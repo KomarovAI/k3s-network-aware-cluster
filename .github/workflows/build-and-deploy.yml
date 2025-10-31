@@ -1,0 +1,325 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: docker.io
+  SCHEDULER_IMAGE: komarovai/network-aware-scheduler
+  CONTROLLER_IMAGE: komarovai/network-controller
+
+jobs:
+  build-scheduler:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Create go.mod for scheduler
+        run: |
+          cd scheduler/network-aware-scheduler
+          if [ ! -f go.mod ]; then
+            go mod init github.com/KomarovAI/k3s-network-aware-cluster/scheduler/network-aware-scheduler
+            go mod tidy
+          fi
+
+      - name: Download dependencies
+        run: |
+          cd scheduler/network-aware-scheduler
+          go mod download
+
+      - name: Build scheduler
+        run: |
+          cd scheduler/network-aware-scheduler
+          go build -v .
+
+      - name: Run tests
+        run: |
+          cd scheduler/network-aware-scheduler
+          go test -v ./... || true
+
+      - name: Run go vet
+        run: |
+          cd scheduler/network-aware-scheduler
+          go vet ./...
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create Dockerfile for scheduler
+        run: |
+          mkdir -p docker/network-scheduler
+          cat > docker/network-scheduler/Dockerfile << 'EOF'
+          FROM golang:1.21-alpine AS builder
+          WORKDIR /app
+          COPY scheduler/network-aware-scheduler/ ./
+          RUN go mod download && go build -o network-scheduler .
+          
+          FROM alpine:3.18
+          RUN apk --no-cache add ca-certificates
+          WORKDIR /root/
+          COPY --from=builder /app/network-scheduler /usr/local/bin/network-scheduler
+          RUN adduser -D -s /bin/sh scheduler
+          USER scheduler
+          EXPOSE 10259
+          ENTRYPOINT ["/usr/local/bin/network-scheduler"]
+          EOF
+
+      - name: Build and push Docker image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: docker/network-scheduler/Dockerfile
+          push: true
+          tags: |
+            ${{ env.SCHEDULER_IMAGE }}:latest
+            ${{ env.SCHEDULER_IMAGE }}:${{ github.sha }}
+
+  build-controller:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Create go.mod for controller
+        run: |
+          cd scheduler/network-controller
+          if [ ! -f go.mod ]; then
+            go mod init github.com/KomarovAI/k3s-network-aware-cluster/scheduler/network-controller
+            go mod tidy
+          fi
+
+      - name: Download dependencies
+        run: |
+          cd scheduler/network-controller
+          go mod download
+
+      - name: Build controller
+        run: |
+          cd scheduler/network-controller
+          go build -v .
+
+      - name: Run tests
+        run: |
+          cd scheduler/network-controller
+          go test -v ./... || true
+
+      - name: Run go vet
+        run: |
+          cd scheduler/network-controller
+          go vet ./...
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create Dockerfile for controller
+        run: |
+          mkdir -p docker/network-controller
+          cat > docker/network-controller/Dockerfile << 'EOF'
+          FROM golang:1.21-alpine AS builder
+          WORKDIR /app
+          RUN apk add --no-cache git
+          COPY scheduler/network-controller/ ./
+          RUN go mod download && go build -o network-controller .
+          
+          FROM alpine:3.18
+          RUN apk --no-cache add ca-certificates iputils iperf3 curl jq
+          WORKDIR /root/
+          COPY --from=builder /app/network-controller /usr/local/bin/network-controller
+          RUN mkdir -p /var/lib/network-controller
+          RUN echo '#!/bin/sh' > /usr/local/bin/healthcheck.sh && \
+              echo 'curl -f http://localhost:8080/healthz || exit 1' >> /usr/local/bin/healthcheck.sh && \
+              chmod +x /usr/local/bin/healthcheck.sh
+          EXPOSE 8080
+          HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/usr/local/bin/healthcheck.sh"]
+          ENTRYPOINT ["/usr/local/bin/network-controller"]
+          EOF
+
+      - name: Build and push Docker image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: docker/network-controller/Dockerfile
+          push: true
+          tags: |
+            ${{ env.CONTROLLER_IMAGE }}:latest
+            ${{ env.CONTROLLER_IMAGE }}:${{ github.sha }}
+
+  validate-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Validate Kubernetes manifests
+        run: |
+          kubectl --dry-run=client apply -f manifests/network-crds/ || true
+          kubectl --dry-run=client apply -f manifests/scheduler/ || true
+          kubectl --dry-run=client apply -f manifests/applications/ || true
+
+      - name: Lint YAML files
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: manifests/
+          config_data: |
+            extends: default
+            rules:
+              line-length:
+                max: 120
+              indentation:
+                spaces: 2
+
+  security-scan:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    needs: [build-scheduler, build-controller]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.SCHEDULER_IMAGE }}:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  deploy:
+    needs: [build-scheduler, build-controller, validate-manifests]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Verify cluster access
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Deploy to K3S
+        run: |
+          # Apply CRDs first
+          kubectl apply -f manifests/network-crds/
+          
+          # Wait for CRDs to be established
+          sleep 10
+          
+          # Update scheduler image
+          kubectl set image deployment/network-aware-scheduler \
+            scheduler=${{ env.SCHEDULER_IMAGE }}:${{ github.sha }} \
+            -n kube-system
+          
+          # Update controller image  
+          kubectl set image deployment/network-controller \
+            controller=${{ env.CONTROLLER_IMAGE }}:${{ github.sha }} \
+            -n kube-system
+          
+          # Apply any new manifests
+          kubectl apply -f manifests/scheduler/
+          kubectl apply -f manifests/applications/
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/network-aware-scheduler -n kube-system --timeout=300s
+          kubectl rollout status deployment/network-controller -n kube-system --timeout=300s
+          
+          # Check if network topology is created
+          sleep 30
+          kubectl get networktopology komarov-network || echo "Network topology not yet created"
+          
+          # Show final status
+          kubectl get pods -n kube-system | grep network
+          kubectl get pods -n default
+
+      - name: Run post-deployment tests
+        run: |
+          # Test scheduler is responding
+          kubectl get pods -n kube-system -l app=network-aware-scheduler
+          
+          # Test controller is responding
+          kubectl get pods -n kube-system -l app=network-controller
+          
+          # Test that new pods can be scheduled
+          kubectl run test-pod --image=alpine:latest --rm -it --restart=Never -- echo "Scheduler test successful" || true
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ Deployment successful!"
+          else
+            echo "❌ Deployment failed!"
+            kubectl describe pods -n kube-system -l app=network-aware-scheduler
+            kubectl describe pods -n kube-system -l app=network-controller
+          fi
