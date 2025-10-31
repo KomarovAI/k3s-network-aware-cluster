@@ -1,0 +1,133 @@
+# ResourceQuotas for namespace-level resource management
+# Prevents resource exhaustion and ensures fair allocation
+
+---
+# Apps namespace quota (generous for Home PC workers)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: apps-quota
+  namespace: apps
+spec:
+  hard:
+    # CPU and memory (Home PCs: 2×26CPU, 2×64GB)
+    requests.cpu: "40000m"      # 40 cores total (leave some for system)
+    requests.memory: "100Gi"    # 100GB total memory requests
+    limits.cpu: "48000m"        # 48 cores limit (burst capacity)
+    limits.memory: "120Gi"      # 120GB total memory limits
+    
+    # Storage (Home PCs: 2×1TB)
+    requests.storage: "1500Gi"  # 1.5TB total storage requests
+    persistentvolumeclaims: "50"  # Max 50 PVCs
+    
+    # Object limits
+    count/pods: "200"           # Max 200 pods
+    count/services: "100"       # Max 100 services
+    count/deployments.apps: "50"  # Max 50 deployments
+    count/replicasets.apps: "100"  # Max 100 replicasets
+    count/configmaps: "100"     # Max 100 configmaps
+    count/secrets: "50"         # Max 50 secrets
+    
+    # Network objects
+    count/networkpolicies.networking.k8s.io: "20"  # Max 20 network policies
+    count/ingresses.networking.k8s.io: "20"        # Max 20 ingress rules
+---
+# System namespace quota (moderate for management tools)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: system-quota
+  namespace: system
+spec:
+  hard:
+    # CPU and memory (system tools can run on both VPS and Home PCs)
+    requests.cpu: "4000m"       # 4 cores for system tools
+    requests.memory: "8Gi"      # 8GB for system tools
+    limits.cpu: "8000m"         # 8 cores limit
+    limits.memory: "16Gi"       # 16GB limit
+    
+    # Storage
+    requests.storage: "100Gi"   # 100GB for system data
+    persistentvolumeclaims: "10"  # Max 10 PVCs
+    
+    # Object limits
+    count/pods: "50"            # Max 50 system pods
+    count/services: "20"        # Max 20 system services
+    count/deployments.apps: "20"  # Max 20 system deployments
+    count/configmaps: "50"      # Max 50 configmaps
+    count/secrets: "20"         # Max 20 secrets
+---
+# Monitoring namespace quota (VPS-optimized)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: monitoring-quota
+  namespace: monitoring
+spec:
+  hard:
+    # CPU and memory (optimized for enhanced VPS: 3vCPU, 4GB)
+    requests.cpu: "2000m"       # 2 cores for monitoring (VPS can handle)
+    requests.memory: "3Gi"      # 3GB for Prometheus + Grafana
+    limits.cpu: "2500m"         # 2.5 cores limit (leave 0.5 for system)
+    limits.memory: "3.5Gi"      # 3.5GB limit (leave 0.5GB for system)
+    
+    # Storage (enhanced VPS: 100GB)
+    requests.storage: "80Gi"    # 80GB for metrics and dashboards
+    persistentvolumeclaims: "5"   # Max 5 PVCs
+    
+    # Object limits
+    count/pods: "20"            # Max 20 monitoring pods
+    count/services: "10"        # Max 10 monitoring services
+    count/deployments.apps: "10"  # Max 10 monitoring deployments
+    count/configmaps: "20"      # Max 20 configmaps
+    count/secrets: "10"         # Max 10 secrets
+---
+# Security namespace quota (lightweight)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: security-quota
+  namespace: security
+spec:
+  hard:
+    # CPU and memory (security tools are lightweight)
+    requests.cpu: "500m"        # 0.5 core for security tools
+    requests.memory: "1Gi"      # 1GB for security tools
+    limits.cpu: "1000m"         # 1 core limit
+    limits.memory: "2Gi"        # 2GB limit
+    
+    # Storage
+    requests.storage: "10Gi"    # 10GB for security data
+    persistentvolumeclaims: "5"   # Max 5 PVCs
+    
+    # Object limits
+    count/pods: "10"            # Max 10 security pods
+    count/services: "5"         # Max 5 security services
+    count/deployments.apps: "10"  # Max 10 security deployments
+    count/configmaps: "20"      # Max 20 configmaps (for configs)
+    count/secrets: "100"        # Max 100 secrets (external secrets)
+---
+# Kube-system namespace quota (enhanced VPS system resources)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: kube-system-quota
+  namespace: kube-system
+spec:
+  hard:
+    # CPU and memory (enhanced VPS: 3vCPU, 4GB - reserve for K8s)
+    requests.cpu: "1500m"       # 1.5 cores for K8s system
+    requests.memory: "2Gi"      # 2GB for K8s system components
+    limits.cpu: "2000m"         # 2 cores limit for system
+    limits.memory: "2.5Gi"      # 2.5GB limit for system
+    
+    # Storage
+    requests.storage: "50Gi"    # 50GB for system data
+    persistentvolumeclaims: "10"  # Max 10 PVCs
+    
+    # Object limits (system pods)
+    count/pods: "100"           # Max 100 system pods
+    count/services: "50"        # Max 50 system services
+    count/daemonsets.apps: "20"   # Max 20 daemonsets
+    count/configmaps: "50"      # Max 50 system configmaps
+    count/secrets: "30"         # Max 30 system secrets
