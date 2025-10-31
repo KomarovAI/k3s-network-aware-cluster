@@ -1,0 +1,5 @@
+# Pod Security Standards labels for production
+# Applied via kustomize patches for namespaces
+
+# This file is a reference and documentation.
+# Actual labels are applied in kustomization.yaml patches.
