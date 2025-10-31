@@ -1,0 +1,220 @@
+# Base Network Policies (Zero Trust foundation)
+# Default deny + essential communication
+
+---
+# Default deny all ingress and egress in apps namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: apps
+  labels:
+    policy-type: baseline-security
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+---
+# Allow DNS resolution (essential for all applications)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: apps
+  labels:
+    policy-type: baseline-connectivity
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  # Allow UDP/TCP DNS to kube-system (CoreDNS)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow DNS to system namespace (if running custom DNS)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+# Allow communication within same namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  namespace: apps
+  labels:
+    policy-type: baseline-connectivity
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector: {}  # All pods in same namespace
+---
+# Allow monitoring scraping (Prometheus)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-ingress
+  namespace: apps
+  labels:
+    policy-type: observability
+spec:
+  podSelector:
+    matchLabels:
+      monitoring: "true"  # Only pods with monitoring=true label
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8080  # Common metrics port
+    - protocol: TCP
+      port: 9090  # Prometheus metrics
+    - protocol: TCP
+      port: 3000  # Grafana port
+---
+# System namespace: Allow communication within system namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: system-internal-communication
+  namespace: system
+  labels:
+    policy-type: system-connectivity
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector: {}  # Same namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring  # Allow monitoring
+  egress:
+  - to:
+    - podSelector: {}  # Same namespace
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system  # DNS access
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: apps  # Access to apps if needed
+---
+# Monitoring namespace: Allow scraping and internal communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-access
+  namespace: monitoring
+  labels:
+    policy-type: monitoring-connectivity
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector: {}  # Internal monitoring communication
+  egress:
+  # DNS access
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Scrape metrics from all namespaces
+  - to:
+    - namespaceSelector: {}  # All namespaces
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9090
+    - protocol: TCP
+      port: 3000
+  # Internal communication
+  - to:
+    - podSelector: {}
+  # Access K8s API for service discovery
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 6443  # K8s API server
+    - protocol: TCP
+      port: 443   # HTTPS
+---
+# Security namespace: Restricted communication (External Secrets, etc.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: security-restricted
+  namespace: security
+  labels:
+    policy-type: security-isolation
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector: {}  # Internal security communication
+  egress:
+  # DNS access
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # HTTPS to external secrets providers (GitHub, etc.)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  # K8s API access
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 6443
+  # Internal communication
+  - to:
+    - podSelector: {}
