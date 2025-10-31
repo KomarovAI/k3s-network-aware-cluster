@@ -1,0 +1,45 @@
+# Production Kustomize Overlay
+# Applies production-grade security, ingress, monitoring, and external secrets
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namePrefix: prod-
+
+resources:
+  - ../../base
+  - pss-labels.yaml
+  - quotas-overrides.yaml
+  - ingress-nginx/deploy.yaml
+  - ingress-nginx/configmap.yaml
+  - monitoring/prometheus.yaml
+  - monitoring/grafana.yaml
+  - external-secrets/secretstore-github.yaml
+  - external-secrets/examples.yaml
+
+commonLabels:
+  environment: prod
+
+patches:
+  - target:
+      kind: Namespace
+      name: apps
+    patch: |
+      - op: add
+        path: /metadata/labels/pod-security.kubernetes.io~1enforce
+        value: "baseline"
+      - op: add
+        path: /metadata/labels/pod-security.kubernetes.io~1enforce-version
+        value: "latest"
+      - op: add
+        path: /metadata/labels/pod-security.kubernetes.io~1audit
+        value: "restricted"
+      - op: add
+        path: /metadata/labels/pod-security.kubernetes.io~1audit-version
+        value: "latest"
+      - op: add
+        path: /metadata/labels/pod-security.kubernetes.io~1warn
+        value: "restricted"
+      - op: add
+        path: /metadata/labels/pod-security.kubernetes.io~1warn-version
+        value: "latest"
