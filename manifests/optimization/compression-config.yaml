@@ -1,0 +1,135 @@
+# Network Compression and Optimization Configuration
+# Optimizes data exchange between VPS master and Home PC workers
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: network-compression-config
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: network-optimization
+    app.kubernetes.io/component: compression
+data:
+  # gRPC Compression Settings
+  grpc.compression.algorithm: "gzip"
+  grpc.compression.level: "6"
+  grpc.max.message.size: "4194304"  # 4MB
+  grpc.keepalive.time: "30s"
+  grpc.keepalive.timeout: "5s"
+  
+  # JSON API Optimization
+  json.minification.enabled: "true"
+  json.compression.enabled: "true"
+  json.compression.threshold: "1024"  # Compress responses > 1KB
+  json.key.shortening.enabled: "true"
+  
+  # HTTP/2 Settings
+  http2.enabled: "true"
+  http2.max.concurrent.streams: "100"
+  http2.initial.window.size: "65536"
+  
+  # Batch Processing
+  batch.requests.enabled: "true"
+  batch.max.size: "50"
+  batch.timeout: "100ms"
+  batch.max.wait: "500ms"
+  
+  # Traffic Shaping
+  traffic.shaping.enabled: "true"
+  vps.upstream.limit: "8mbps"     # Leave 2mbps headroom
+  vps.downstream.limit: "8mbps"
+  home.local.limit: "900mbps"     # Leave 100mbps headroom
+  
+  # Monitoring Optimization  
+  metrics.compression.enabled: "true"
+  metrics.batch.interval: "30s"
+  metrics.retention.local: "1h"
+  logs.compression.enabled: "true"
+  logs.batch.size: "100"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-compression-config
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: optimization
+data:
+  # Advanced compression for slow VPS-Home links
+  enable-brotli: "true"
+  brotli-level: "6"
+  brotli-types: "application/json,application/javascript,text/css,text/plain,text/xml,application/xml+rss,application/atom+xml,image/svg+xml"
+  
+  # Gzip compression
+  gzip: "on"
+  gzip-level: "6"
+  gzip-min-length: "1024"
+  gzip-types: "application/json,application/javascript,text/css,text/plain,text/xml"
+  
+  # Connection optimization
+  keep-alive: "75s"
+  keep-alive-requests: "1000"
+  upstream-keepalive-connections: "32"
+  upstream-keepalive-requests: "100"
+  upstream-keepalive-timeout: "60s"
+  
+  # Buffer optimization for slow links
+  proxy-buffering: "on"
+  proxy-buffer-size: "4k"
+  proxy-buffers: "8 4k"
+  proxy-busy-buffers-size: "8k"
+  
+  # Request optimization
+  client-body-buffer-size: "1m"
+  client-max-body-size: "10m"
+  large-client-header-buffers: "4 8k"
+  
+  # Worker optimization for VPS
+  worker-processes: "2"
+  worker-connections: "1024"
+  worker-rlimit-nofile: "2048"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubelet-compression-config
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: kubelet-optimization
+    app.kubernetes.io/component: compression
+data:
+  # Kubelet optimization for network-constrained environments
+  kubelet-config.yaml: |
+    apiVersion: kubelet.config.k8s.io/v1beta1
+    kind: KubeletConfiguration
+    
+    # Image pull optimization
+    serializeImagePulls: false
+    registryPullQPS: 5
+    registryBurst: 10
+    
+    # Network optimization
+    maxPods: 110
+    podPidsLimit: 2048
+    
+    # Resource optimization
+    kubeAPIQPS: 20
+    kubeAPIBurst: 40
+    
+    # Logging optimization
+    containerLogMaxSize: "10Mi"
+    containerLogMaxFiles: 3
+    
+    # Status update optimization
+    nodeStatusUpdateFrequency: "10s"
+    nodeStatusReportFrequency: "30s"
+    
+    # Authentication optimization
+    authentication:
+      webhook:
+        cacheTTL: "2m"
+    authorization:
+      webhook:
+        cacheAuthorizedTTL: "5m"
+        cacheUnauthorizedTTL: "30s"
