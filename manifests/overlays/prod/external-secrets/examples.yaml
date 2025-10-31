@@ -1,0 +1,245 @@
+# External Secrets Examples for GitHub Integration
+# Common patterns for syncing GitHub secrets to Kubernetes
+
+---
+# Example 1: Database credentials from GitHub secrets
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: database-credentials
+  namespace: apps
+  labels:
+    app: database
+    secret-type: credentials
+spec:
+  # Refresh interval (GitHub secrets don't change often)
+  refreshInterval: "1h"
+  
+  # Reference to SecretStore
+  secretStoreRef:
+    name: github-secrets-store
+    namespace: security
+    kind: SecretStore
+  
+  # Target Kubernetes Secret
+  target:
+    name: database-secret
+    type: Opaque
+    
+  # Map GitHub secrets to Kubernetes secret keys
+  data:
+  - secretKey: username
+    remoteRef:
+      key: DB_USERNAME        # GitHub secret name
+  - secretKey: password
+    remoteRef:
+      key: DB_PASSWORD        # GitHub secret name
+  - secretKey: host
+    remoteRef:
+      key: DB_HOST           # GitHub secret name
+  - secretKey: database
+    remoteRef:
+      key: DB_NAME           # GitHub secret name
+---
+# Example 2: API keys for external services
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: api-keys
+  namespace: apps
+  labels:
+    secret-type: api-keys
+spec:
+  refreshInterval: "30m"     # API keys might change more often
+  
+  secretStoreRef:
+    name: github-secrets-store
+    namespace: security
+    kind: SecretStore
+  
+  target:
+    name: external-api-keys
+    type: Opaque
+    
+  data:
+  - secretKey: openai-api-key
+    remoteRef:
+      key: OPENAI_API_KEY
+  - secretKey: github-token
+    remoteRef:
+      key: GITHUB_TOKEN
+  - secretKey: telegram-bot-token
+    remoteRef:
+      key: TELEGRAM_BOT_TOKEN
+  - secretKey: stripe-secret-key
+    remoteRef:
+      key: STRIPE_SECRET_KEY
+---
+# Example 3: Docker registry credentials from GitHub
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: registry-credentials
+  namespace: apps
+  labels:
+    secret-type: registry-auth
+spec:
+  refreshInterval: "24h"      # Registry creds are stable
+  
+  secretStoreRef:
+    name: github-secrets-store
+    namespace: security
+    kind: SecretStore
+  
+  target:
+    name: docker-registry-secret
+    type: kubernetes.io/dockerconfigjson
+    template:
+      type: kubernetes.io/dockerconfigjson
+      data:
+        .dockerconfigjson: |
+          {
+            "auths": {
+              "{{ .registry_server }}": {
+                "username": "{{ .registry_username }}",
+                "password": "{{ .registry_password }}",
+                "email": "{{ .registry_email }}",
+                "auth": "{{ (print .registry_username ":" .registry_password) | b64enc }}"
+              }
+            }
+          }
+  
+  data:
+  - secretKey: registry_server
+    remoteRef:
+      key: DOCKER_REGISTRY_SERVER    # e.g., "ghcr.io"
+  - secretKey: registry_username
+    remoteRef:
+      key: DOCKER_REGISTRY_USERNAME
+  - secretKey: registry_password
+    remoteRef:
+      key: DOCKER_REGISTRY_PASSWORD
+  - secretKey: registry_email
+    remoteRef:
+      key: DOCKER_REGISTRY_EMAIL
+---
+# Example 4: TLS certificates from GitHub secrets
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: tls-certificates
+  namespace: apps
+  labels:
+    secret-type: tls
+spec:
+  refreshInterval: "168h"     # Weekly check for cert renewal
+  
+  secretStoreRef:
+    name: github-secrets-store
+    namespace: security
+    kind: SecretStore
+  
+  target:
+    name: app-tls-secret
+    type: kubernetes.io/tls
+    
+  data:
+  - secretKey: tls.crt
+    remoteRef:
+      key: TLS_CERTIFICATE    # Base64 encoded certificate
+  - secretKey: tls.key
+    remoteRef:
+      key: TLS_PRIVATE_KEY    # Base64 encoded private key
+---
+# Example 5: Application configuration from GitHub
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: app-config-secrets
+  namespace: apps
+  labels:
+    app: my-app
+    secret-type: config
+spec:
+  refreshInterval: "10m"      # Config might change during development
+  
+  secretStoreRef:
+    name: github-secrets-store
+    namespace: security
+    kind: SecretStore
+  
+  target:
+    name: app-config-secret
+    type: Opaque
+    
+  # Template for complex configurations
+  target:
+    template:
+      type: Opaque
+      data:
+        config.yaml: |
+          database:
+            host: "{{ .db_host }}"
+            username: "{{ .db_username }}"
+            password: "{{ .db_password }}"
+          api:
+            key: "{{ .api_key }}"
+            secret: "{{ .api_secret }}"
+          features:
+            ai_enabled: {{ .ai_enabled }}
+            debug_mode: {{ .debug_mode }}
+  
+  data:
+  - secretKey: db_host
+    remoteRef:
+      key: DATABASE_HOST
+  - secretKey: db_username
+    remoteRef:
+      key: DATABASE_USERNAME
+  - secretKey: db_password
+    remoteRef:
+      key: DATABASE_PASSWORD
+  - secretKey: api_key
+    remoteRef:
+      key: EXTERNAL_API_KEY
+  - secretKey: api_secret
+    remoteRef:
+      key: EXTERNAL_API_SECRET
+  - secretKey: ai_enabled
+    remoteRef:
+      key: FEATURE_AI_ENABLED
+  - secretKey: debug_mode
+    remoteRef:
+      key: DEBUG_MODE
+---
+# Example 6: Monitoring secrets (Grafana admin, etc.)
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: monitoring-secrets
+  namespace: monitoring
+  labels:
+    component: monitoring
+    secret-type: credentials
+spec:
+  refreshInterval: "24h"
+  
+  secretStoreRef:
+    name: github-secrets-store
+    namespace: security
+    kind: SecretStore
+  
+  target:
+    name: monitoring-credentials
+    type: Opaque
+    
+  data:
+  - secretKey: grafana-admin-password
+    remoteRef:
+      key: GRAFANA_ADMIN_PASSWORD
+  - secretKey: prometheus-admin-password
+    remoteRef:
+      key: PROMETHEUS_ADMIN_PASSWORD
+  - secretKey: alertmanager-webhook-url
+    remoteRef:
+      key: ALERTMANAGER_WEBHOOK_URL
