@@ -1,0 +1,124 @@
+# NGINX Ingress Controller Configuration (Production)
+# Optimized for enhanced VPS: 3 vCPU, 4GB RAM, 1250 МБ/с bandwidth
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingress-nginx-controller
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx
+data:
+  # Performance optimization for enhanced VPS (3 vCPU)
+  worker-processes: "3"                    # Match VPS CPU cores
+  worker-connections: "4096"               # Higher with 4GB RAM
+  worker-rlimit-nofile: "8192"             # File descriptor limit
+  max-worker-open-files: "8192"
+  
+  # Enhanced compression for 1250 МБ/с external bandwidth
+  enable-brotli: "true"
+  brotli-level: "6"
+  brotli-types: "application/atom+xml,application/javascript,application/json,application/rss+xml,application/vnd.ms-fontobject,application/x-font-opentype,application/x-font-truetype,application/x-font-ttf,application/x-javascript,application/xhtml+xml,application/xml,font/eot,font/opentype,font/otf,font/truetype,image/svg+xml,image/vnd.microsoft.icon,image/x-icon,image/x-win-bitmap,text/css,text/javascript,text/plain,text/xml"
+  
+  gzip: "on"
+  gzip-level: "6"                          # Optimal CPU/compression balance
+  gzip-min-length: "1024"
+  gzip-types: "application/atom+xml,application/javascript,application/json,application/ld+json,application/manifest+json,application/rss+xml,application/vnd.geo+json,application/vnd.ms-fontobject,application/x-font-ttf,application/x-web-app-manifest+json,application/xhtml+xml,application/xml,font/opentype,image/bmp,image/svg+xml,image/x-icon,text/cache-manifest,text/css,text/plain,text/vcard,text/vnd.rim.location.xloc,text/vtt,text/x-component,text/x-cross-domain-policy"
+  
+  # Connection optimization for 1250 МБ/с
+  keep-alive: "75s"                        # Connection reuse
+  keep-alive-requests: "2000"              # More requests per connection
+  upstream-keepalive-connections: "128"    # Pool connections to backends
+  upstream-keepalive-timeout: "90s"
+  upstream-keepalive-requests: "1000"
+  
+  # Buffer optimization for high bandwidth
+  client-body-buffer-size: "16k"           # Larger buffers
+  client-header-buffer-size: "4k"
+  large-client-header-buffers: "8 16k"     # Handle large headers
+  proxy-buffer-size: "16k"                 # Backend response buffers
+  proxy-buffers: "32 16k"                  # More buffers with 4GB RAM
+  proxy-busy-buffers-size: "32k"
+  
+  # Request limits (protect enhanced VPS)
+  client-max-body-size: "100m"             # Allow larger uploads
+  proxy-connect-timeout: "60s"             # Longer timeout for 10 МБ/с workers
+  proxy-read-timeout: "300s"               # Handle slow worker responses
+  proxy-send-timeout: "300s"
+  
+  # Rate limiting (protect VPS from overload)
+  rate-limit-connections: "100"            # Per IP connection limit
+  rate-limit-rps: "50"                     # Requests per second limit
+  
+  # SSL/TLS optimization
+  ssl-protocols: "TLSv1.2 TLSv1.3"
+  ssl-ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256,ECDHE-RSA-AES128-GCM-SHA256,ECDHE-ECDSA-AES256-GCM-SHA384,ECDHE-RSA-AES256-GCM-SHA384,ECDHE-ECDSA-CHACHA20-POLY1305,ECDHE-RSA-CHACHA20-POLY1305"
+  ssl-session-cache: "shared:SSL:10m"
+  ssl-session-timeout: "1h"
+  ssl-buffer-size: "4k"                    # Optimal for most responses
+  
+  # Security headers
+  add-headers: "ingress-nginx/security-headers"
+  hide-headers: "Server,X-Powered-By"
+  server-tokens: "false"
+  
+  # Logging optimization (reduce disk I/O on VPS)
+  access-log-path: "/dev/stdout"
+  error-log-path: "/dev/stderr"
+  log-format-escape-json: "true"
+  
+  # HTTP/2 optimization
+  use-http2: "true"
+  http2-max-field-size: "8k"
+  http2-max-header-size: "32k"
+  
+  # Proxy optimizations for workers over 10 МБ/с links
+  proxy-request-buffering: "off"           # Stream to workers immediately
+  proxy-buffering: "off"                   # No buffering for slow links
+  enable-access-log-for-default-backend: "false"
+  
+  # Custom error pages (reduce bandwidth usage)
+  custom-http-errors: "404,503"
+  default-backend-service: "ingress-nginx/ingress-nginx-defaultbackend"
+---
+# Security headers ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: security-headers
+  namespace: ingress-nginx
+data:
+  X-Frame-Options: "SAMEORIGIN"
+  X-Content-Type-Options: "nosniff"
+  X-XSS-Protection: "1; mode=block"
+  Referrer-Policy: "strict-origin-when-cross-origin"
+  Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+  Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+  Permissions-Policy: "geolocation=(), microphone=(), camera=()"
+---
+# Service for Ingress Controller
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-nginx-controller
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx
+spec:
+  type: NodePort
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+    nodePort: 30080
+  - port: 443
+    targetPort: 443
+    protocol: TCP
+    name: https
+    nodePort: 30443
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx
