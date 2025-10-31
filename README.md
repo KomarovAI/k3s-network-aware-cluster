@@ -12,7 +12,7 @@
   - CPU: **3 vCPU**
   - RAM: **4 GB**
   - Storage: **100 GB NVMe**
-  - Network: **1,250 Mbps external bandwidth** (to the Internet and to worker nodes via Tailscale)
+  - Network: **1 250 МБ/с внешний канал** (к Интернету и к воркерам через Tailscale)
   - Role: Control plane only (ingress + monitoring allowed)
 
 - 🔹 **Worker nodes (Home PCs) — at least 2 nodes**:
@@ -20,26 +20,26 @@
   - RAM: **64 GB (per node)**
   - Storage: **1 TB NVMe (per node)**
   - GPU: **NVIDIA RTX 3090 (per node)**
-  - Network: **10 Mbps upstream/downstream to VPS** (over Tailscale); **1 Gbps local LAN**
+  - Network: **10 МБ/с канал до VPS** (через Tailscale); **1 ГБ/с локальная LAN**
   - Role: All workloads (AI/ML, DB, web)
 
-> Примечание: Репозиторий тюнится под эти параметры. Лейблы/таинты, правила размещения, HPA/PDB, ретеншн мониторинга и ресурсы ingress учитывают узкий канал 10 Mbps у воркеров и широкий 1.25 Gbps у VPS.
+> Примечание: Репозиторий тюнится под эти параметры. Лейблы/таинты, правила размещения, HPA/PDB, ретеншн мониторинга и ресурсы ingress учитывают узкий канал **10 МБ/с** у воркеров и широкий **1 250 МБ/с** у VPS.
 
 ## 🏗️ Architecture (summary)
 
 - VPS master изолирован (control plane + ingress + monitoring)
 - Все пользовательские нагрузки размещаются на Home PC (node selectors/affinity)
-- Компрессия трафика (gzip/brotli) и TCP BBR компенсируют 10 Mbps канал у воркеров
-- Мониторинг и ingress на VPS используют 1.25 Gbps внешний канал
+- Компрессия трафика (gzip/brotli) и TCP BBR компенсируют **10 МБ/с** канал у воркеров
+- Мониторинг и ingress на VPS используют **1 250 МБ/с** внешний канал
 
 ## 🚀 Quick Start
 
-1) **Install enhanced master** (VPS 3 vCPU / 4GB / 100GB NVMe / 1.25 Gbps)
+1) **Install enhanced master** (VPS 3 vCPU / 4GB / 100GB NVMe / **1 250 МБ/с**)
 ```bash
 python3 scripts/install_cluster_enhanced.py --mode master
 ```
 
-2) **Join workers** (2× Home PC: 26 CPU / 64GB / 1TB / RTX 3090 / 10 Mbps to VPS)
+2) **Join workers** (2× Home PC: 26 CPU / 64GB / 1TB / RTX 3090 / **10 МБ/с** до VPS)
 ```bash
 scp ~/join_worker_enhanced.py user@worker:/tmp/
 ssh user@worker "python3 /tmp/join_worker_enhanced.py"
