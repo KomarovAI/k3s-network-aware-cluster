@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-providers
+  namespace: monitoring
+  labels:
+    grafana_dashboard_providers: "1"
+data:
+  providers.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'k8s-dashboards'
+        orgId: 1
+        folder: 'Kubernetes'
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana-enhanced
+  namespace: monitoring
+spec:
+  template:
+    spec:
+      volumes:
+        - name: dashboards
+          projected:
+            sources:
+              - configMap:
+                  name: grafana-dashboards
+                  items:
+                    - key: k8s-dashboard.json
+                      path: k8s-dashboard.json
+              - configMap:
+                  name: grafana-dashboards-providers
+                  items:
+                    - key: providers.yaml
+                      path: providers.yaml
+      containers:
+        - name: grafana
+          volumeMounts:
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+            - name: dashboards
+              mountPath: /etc/grafana/provisioning/dashboards
+              subPath: providers.yaml
+              readOnly: true
+            - name: datasource
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+        - name: grafana
+          volumeMounts: []
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource-providers
+  namespace: monitoring
+  labels:
+    grafana_datasource_providers: "1"
+data:
+  providers.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-enhanced.monitoring.svc.cluster.local:9090
+        isDefault: true
