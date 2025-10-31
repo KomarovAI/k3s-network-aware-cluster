@@ -1,0 +1,49 @@
+# Base Kustomize Configuration
+# Common resources for all environments
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: k3s-hybrid-cluster-base
+  annotations:
+    config.kubernetes.io/local-config: "true"
+
+# Base resources
+resources:
+- namespaces.yaml
+- limitranges.yaml  
+- resourcequotas.yaml
+- network-policies-base.yaml
+- rbac-base.yaml
+- registry-config.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  cluster-type: k3s-hybrid
+  managed-by: kustomize
+  
+# Common annotations
+commonAnnotations:
+  config.kubernetes.io/origin: "k3s-network-aware-cluster"
+  
+# Configuration patches
+patches:
+- target:
+    kind: Namespace
+    name: apps
+  patch: |
+    - op: add
+      path: /metadata/labels/environment
+      value: base
+
+# Generate ConfigMaps from files
+configMapGenerator:
+- name: cluster-info-base
+  literals:
+  - cluster-type=k3s-hybrid
+  - vps-specs=3vCPU-4GB-100GB
+  - worker-specs=26CPU-64GB-1TB-RTX3090
+  - network-vps=1250MB-s
+  - network-workers=10MB-s
+  - optimization-level=production
