@@ -1,0 +1,129 @@
+# Example Network Topology for Komarov AI Cluster
+# This defines the network characteristics between nodes in the cluster
+apiVersion: network.komarov.dev/v1
+kind: NetworkTopology
+metadata:
+  name: komarov-network
+  labels:
+    app.kubernetes.io/name: network-topology
+    app.kubernetes.io/component: network-aware-scheduler
+    app.kubernetes.io/managed-by: komarov-ai
+spec:
+  nodes:
+    # VPS in Germany (Master Node)
+    vps-germany:
+      zone: remote
+      region: eu-central-1
+      provider: hetzner
+      capabilities:
+      - internet
+      - high-bandwidth
+      bandwidth:
+        pc-home: "10mbps"        # Slow home internet connection
+        pc-office: "10mbps"      # Another home connection
+        internet: "1000mbps"     # Fast datacenter connection
+        local: "10gbps"          # Local datacenter network
+      latency:
+        pc-home: "45ms"          # International latency
+        pc-office: "45ms"        # International latency
+        internet: "5ms"          # Local datacenter latency
+        local: "1ms"             # Same datacenter
+      cost:
+        pc-home: 0.8             # High cost due to slow link
+        pc-office: 0.8           # High cost due to slow link
+        internet: 0.1            # Low cost, fast connection
+        local: 0.05              # Very low cost, local
+    
+    # Home PC #1 (AI Worker)
+    pc-home:
+      zone: local
+      region: ru-moscow
+      provider: home-internet
+      capabilities:
+      - gpu-direct
+      - nvlink
+      bandwidth:
+        vps-germany: "10mbps"    # Limited by home internet
+        pc-office: "1000mbps"    # Local network between PCs
+        local: "1000mbps"        # Local network
+        gpu-memory: "12gbps"     # GPU memory bandwidth
+      latency:
+        vps-germany: "45ms"      # International
+        pc-office: "1ms"         # Local network
+        local: "0.1ms"           # Same machine
+        gpu-memory: "0.001ms"    # GPU memory access
+      cost:
+        vps-germany: 0.8         # Expensive international transfer
+        pc-office: 0.1           # Cheap local transfer
+        local: 0.05              # Very cheap local
+        gpu-memory: 0.01         # Extremely cheap GPU memory
+    
+    # Home PC #2 (AI Worker)
+    pc-office:
+      zone: local
+      region: ru-moscow
+      provider: home-internet
+      capabilities:
+      - gpu-direct
+      bandwidth:
+        vps-germany: "10mbps"    # Limited by home internet
+        pc-home: "1000mbps"      # Local network between PCs
+        local: "1000mbps"        # Local network
+        gpu-memory: "10gbps"     # GPU memory bandwidth
+      latency:
+        vps-germany: "45ms"      # International
+        pc-home: "1ms"           # Local network
+        local: "0.1ms"           # Same machine
+        gpu-memory: "0.001ms"    # GPU memory access
+      cost:
+        vps-germany: 0.8         # Expensive international transfer
+        pc-home: 0.1             # Cheap local transfer
+        local: 0.05              # Very cheap local
+        gpu-memory: 0.01         # Extremely cheap GPU memory
+
+---
+# Network Policy to enforce topology awareness
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: network-aware-policy
+  labels:
+    app.kubernetes.io/name: network-policy
+    app.kubernetes.io/component: network-aware-scheduler
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector: {}
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+  egress:
+  - to:
+    - podSelector: {}
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+  # Allow all DNS traffic
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow internet access for public nodes
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 443
