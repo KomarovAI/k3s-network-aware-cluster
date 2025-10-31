@@ -1,0 +1,356 @@
+# Optimized AI Services Deployment
+# Designed for VPS master + Home PC workers architecture
+# Includes compression, network-aware scheduling, and resource optimization
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-optimized
+  namespace: default
+  labels:
+    app: ollama
+    tier: ai-inference
+    optimization: network-aware
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+        tier: ai-inference
+      annotations:
+        # Network-aware scheduling annotations
+        network.komarov.dev/min-bandwidth: "100mbps"
+        network.komarov.dev/max-latency: "10ms"
+        network.komarov.dev/data-locality: "high"
+        network.komarov.dev/compression: "gzip"
+        network.komarov.dev/protocol: "grpc"
+        
+        # Resource optimization
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+        
+        # Monitoring optimization
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      schedulerName: network-aware-scheduler
+      
+      # Force scheduling on home PCs (avoid VPS)
+      nodeSelector:
+        node-type: home-pc
+        compute-tier: workload
+      
+      # Prefer nodes with GPU and high network bandwidth
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: accelerator
+                operator: In
+                values: ["nvidia-gpu"]
+          - weight: 80
+            preference:
+              matchExpressions:
+              - key: network-speed
+                operator: In
+                values: ["1000mbps"]
+          - weight: 60
+            preference:
+              matchExpressions:
+              - key: zone
+                operator: In
+                values: ["local"]
+      
+      tolerations:
+      # Allow scheduling on GPU nodes
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      
+      containers:
+      - name: ollama
+        image: ollama/ollama:latest
+        ports:
+        - containerPort: 11434
+          name: http
+          protocol: TCP
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
+        
+        env:
+        # Network optimization
+        - name: OLLAMA_HOST
+          value: "0.0.0.0:11434"
+        - name: OLLAMA_KEEP_ALIVE
+          value: "5m"
+        - name: OLLAMA_MAX_LOADED_MODELS
+          value: "3"
+        
+        # Compression optimization
+        - name: OLLAMA_COMPRESSION
+          value: "gzip"
+        - name: OLLAMA_BATCH_SIZE
+          value: "512"
+        
+        # GPU optimization
+        - name: OLLAMA_NUM_PARALLEL
+          value: "4"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1000m"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "16Gi"
+            cpu: "4000m"
+            nvidia.com/gpu: 1
+        
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 11434
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+        
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 11434
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+        
+        volumeMounts:
+        - name: ollama-data
+          mountPath: /root/.ollama
+        - name: compression-config
+          mountPath: /etc/compression
+          readOnly: true
+      
+      volumes:
+      - name: ollama-data
+        persistentVolumeClaim:
+          claimName: ollama-pvc
+      - name: compression-config
+        configMap:
+          name: network-compression-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-service
+  namespace: default
+  labels:
+    app: ollama
+  annotations:
+    # Service optimization for slow VPS-Home links
+    service.kubernetes.io/compression: "gzip"
+    service.kubernetes.io/batch-requests: "true"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 11434
+    targetPort: 11434
+    protocol: TCP
+    name: http
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: metrics
+  selector:
+    app: ollama
+---
+# Optimized Stable Diffusion Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stable-diffusion-optimized
+  namespace: default
+  labels:
+    app: stable-diffusion
+    tier: ai-generation
+    optimization: network-aware
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stable-diffusion
+  template:
+    metadata:
+      labels:
+        app: stable-diffusion
+        tier: ai-generation
+      annotations:
+        # Network-aware scheduling for image generation
+        network.komarov.dev/min-bandwidth: "50mbps"
+        network.komarov.dev/max-latency: "50ms"
+        network.komarov.dev/data-locality: "high"
+        network.komarov.dev/compression: "brotli"
+        network.komarov.dev/output-format: "webp"  # Smaller than PNG
+    spec:
+      schedulerName: network-aware-scheduler
+      
+      # Force scheduling on home PCs with GPU
+      nodeSelector:
+        node-type: home-pc
+        compute-tier: workload
+      
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: accelerator
+                operator: In
+                values: ["nvidia-gpu"]
+              - key: node-type
+                operator: NotIn
+                values: ["vps"]  # Never schedule on VPS
+      
+      containers:
+      - name: stable-diffusion
+        image: stabilityai/stable-diffusion:latest
+        ports:
+        - containerPort: 7860
+          name: http
+        
+        env:
+        # Performance optimization
+        - name: GRADIO_SERVER_NAME
+          value: "0.0.0.0"
+        - name: GRADIO_SERVER_PORT
+          value: "7860"
+        
+        # Output optimization for network transfer
+        - name: OUTPUT_FORMAT
+          value: "webp"  # 25-35% smaller than PNG
+        - name: OUTPUT_QUALITY
+          value: "85"    # Good quality with compression
+        - name: BATCH_SIZE
+          value: "1"
+        
+        # GPU optimization
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "max_split_size_mb:512"
+        
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "2000m"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "24Gi"
+            cpu: "6000m"
+            nvidia.com/gpu: 1
+        
+        volumeMounts:
+        - name: models-cache
+          mountPath: /models
+        - name: output-cache
+          mountPath: /outputs
+      
+      volumes:
+      - name: models-cache
+        persistentVolumeClaim:
+          claimName: sd-models-pvc
+      - name: output-cache
+        emptyDir:
+          sizeLimit: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stable-diffusion-service
+  namespace: default
+  labels:
+    app: stable-diffusion
+  annotations:
+    service.kubernetes.io/compression: "brotli"
+    service.kubernetes.io/image-optimization: "webp"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 7860
+    targetPort: 7860
+    protocol: TCP
+    name: http
+  selector:
+    app: stable-diffusion
+---
+# Network-optimized API Gateway for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai-services-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/compression-types: "application/json,text/css,text/plain,text/xml,application/javascript"
+    nginx.ingress.kubernetes.io/enable-brotli: "true"
+    nginx.ingress.kubernetes.io/brotli-level: "6"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    
+    # Rate limiting for VPS bandwidth protection
+    nginx.ingress.kubernetes.io/rate-limit-rps: "10"
+    nginx.ingress.kubernetes.io/rate-limit-burst: "20"
+spec:
+  rules:
+  - host: ai.komarov.local
+    http:
+      paths:
+      - path: /ollama
+        pathType: Prefix
+        backend:
+          service:
+            name: ollama-service
+            port:
+              number: 11434
+      - path: /sd
+        pathType: Prefix
+        backend:
+          service:
+            name: stable-diffusion-service
+            port:
+              number: 7860
+---
+# PVCs for persistent storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: local-path
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sd-models-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: local-path
