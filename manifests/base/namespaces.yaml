@@ -1,0 +1,51 @@
+# Base Namespaces for K3S Hybrid Cluster
+# Common namespaces used across all environments
+
+---
+# Applications namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps
+  labels:
+    name: apps
+    tier: application
+    network-isolation: "true"
+  annotations:
+    description: "User applications and services"
+---
+# System namespace (management tools)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: system
+  labels:
+    name: system
+    tier: system
+    network-isolation: "true"
+  annotations:
+    description: "System management tools and dashboards"
+---
+# Monitoring namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring
+    tier: infrastructure
+    network-isolation: "false"  # Needs access to scrape metrics
+  annotations:
+    description: "Monitoring and observability stack"
+---
+# Security namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security
+  labels:
+    name: security
+    tier: infrastructure
+    network-isolation: "true"
+  annotations:
+    description: "Security tools and external secrets management"
