@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  k8s-dashboard.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "gnetId": 15661,
+      "graphTooltip": 1,
+      "panels": [],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": ["k8s","cluster","nodes","pods"],
+      "templating": {"list": []},
+      "time": {"from": "now-6h", "to": "now"},
+      "timezone": "browser",
+      "title": "K8S Dashboard (Curated)",
+      "uid": "k8s-main",
+      "version": 1
+    }
