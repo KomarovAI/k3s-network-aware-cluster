@@ -1,0 +1,155 @@
+# Network Topology Custom Resource Definition
+# This CRD defines the network characteristics between cluster nodes
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: networktopologies.network.komarov.dev
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.13.0
+spec:
+  group: network.komarov.dev
+  names:
+    kind: NetworkTopology
+    listKind: NetworkTopologyList
+    plural: networktopologies
+    singular: networktopology
+    shortNames:
+    - ntop
+    - netop
+  scope: Cluster
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        description: NetworkTopology defines the network characteristics between cluster nodes
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NetworkTopologySpec defines the desired state of NetworkTopology
+            type: object
+            properties:
+              nodes:
+                description: Nodes contains network characteristics for each node
+                type: object
+                additionalProperties:
+                  type: object
+                  description: NodeSpec defines network characteristics for a single node
+                  properties:
+                    bandwidth:
+                      description: Bandwidth to other nodes (e.g., "10mbps", "1gbps")
+                      type: object
+                      additionalProperties:
+                        type: string
+                        pattern: '^[0-9]+(\.[0-9]+)?(kbps|mbps|gbps)$'
+                    latency:
+                      description: Latency to other nodes (e.g., "1ms", "45ms")
+                      type: object
+                      additionalProperties:
+                        type: string
+                        pattern: '^[0-9]+(\.[0-9]+)?ms$'
+                    cost:
+                      description: Cost of data transfer to other nodes (0.0-1.0, lower is better)
+                      type: object
+                      additionalProperties:
+                        type: number
+                        minimum: 0.0
+                        maximum: 1.0
+                    zone:
+                      description: Network zone (e.g., "local", "remote", "edge")
+                      type: string
+                      enum: ["local", "remote", "edge", "cloud"]
+                    region:
+                      description: Geographic region
+                      type: string
+                    provider:
+                      description: Network provider or type
+                      type: string
+                    capabilities:
+                      description: Network capabilities
+                      type: array
+                      items:
+                        type: string
+                        enum: ["internet", "gpu-direct", "nvlink", "infiniband", "high-bandwidth", "low-latency"]
+          status:
+            description: NetworkTopologyStatus defines the observed state of NetworkTopology
+            type: object
+            properties:
+              lastUpdated:
+                description: Last time the topology was updated
+                type: string
+                format: date-time
+              conditions:
+                description: Conditions represent the latest available observations
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      description: Type of condition
+                      type: string
+                    status:
+                      description: Status of the condition (True, False, Unknown)
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    lastTransitionTime:
+                      description: Last time the condition transitioned
+                      type: string
+                      format: date-time
+                    reason:
+                      description: Reason for the condition's last transition
+                      type: string
+                    message:
+                      description: Human-readable message
+                      type: string
+                  required:
+                  - type
+                  - status
+              observedGeneration:
+                description: ObservedGeneration reflects the generation most recently observed
+                type: integer
+                format: int64
+              nodeCount:
+                description: Number of nodes in the topology
+                type: integer
+              measurementCount:
+                description: Number of network measurements recorded
+                type: integer
+              healthScore:
+                description: Overall network health score (0.0-1.0)
+                type: number
+                minimum: 0.0
+                maximum: 1.0
+    additionalPrinterColumns:
+    - name: Nodes
+      type: integer
+      description: Number of nodes
+      jsonPath: .status.nodeCount
+    - name: Measurements
+      type: integer
+      description: Number of measurements
+      jsonPath: .status.measurementCount
+    - name: Health
+      type: number
+      description: Network health score
+      jsonPath: .status.healthScore
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    - name: Last Updated
+      type: date
+      description: Last update time
+      jsonPath: .status.lastUpdated
+    subresources:
+      status: {}
+  conversion:
+    strategy: None
