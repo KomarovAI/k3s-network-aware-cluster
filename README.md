@@ -33,32 +33,52 @@
 
 ## 🚀 Быстрый старт
 
+### ⚡ Проверка зависимостей (обязательно первым шагом!)
+```bash
+# Запуск проверки всех зависимостей
+./scripts/check_dependencies.sh
+
+# Если есть проблемы - автоматическое исправление
+sudo ./scripts/auto_fix_dependencies.sh
+
+# Повторная проверка
+./scripts/check_dependencies.sh
+```
+
 ### Вариант 1: Базовый оптимизированный кластер
 ```bash
-sudo apt-get update && sudo apt-get install -y curl jq python3 python3-yaml gettext-base
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-python3 scripts/deploy_all_improved.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --gpu true
+# После успешной проверки зависимостей
+python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --gpu true
 ```
 
 ### Вариант 2: Enterprise улучшения (по фазам)
 ```bash
 # Phase 1 (критично): ELK + KEDA + monitoring enhancements
-python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase 1 --confirm
+python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase 1
 
-# Phase 2 (важно): ArgoCD GitOps + Istio Service Mesh
-python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase 2 --confirm
+# Phase 2 (важно): ArgoCD GitOps + Istio Service Mesh  
+python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase 2
 
 # Phase 3 (желательно): Jaeger + OPA Gatekeeper + Falco
-python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase 3 --confirm
+python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase 3
 
 # Все фазы подряд
-python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase all --confirm
+python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase all
+```
+
+### Вариант 3: Только оптимизированные логи
+```bash
+# Развертывание ELK с compression, ILM, noise reduction, snapshots
+python3 scripts/deploy_elk_on_worker.py --domain cockpit.work.gd --retention-days 15 --snapshots
+
+# Применение только ES оптимизаций к существующему ELK
+python3 scripts/es_configure_optimization.py --domain cockpit.work.gd --setup-snapshots
 ```
 
 ### DNS-01 (для заблокированного порта 80)
 ```bash
 export CF_API_TOKEN="your_cloudflare_token"
-python3 scripts/deploy_all_improved.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --gpu true --dns01
+python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --gpu true --dns01
 ```
 
 ## 🌐 TLS, Ingress и Service Mesh
@@ -85,11 +105,12 @@ python3 scripts/deploy_all_improved.py --domain cockpit.work.gd --email artur.ko
 - **Kubevious**: визуальный аудит k8s, поиск конфликтов и зависимостей
 - **OpenTelemetry (опционально)**: унификация метрик/логов/трейсов
 
-## 🧾 Логи (Phase 1)
+## 🧾 Централизованные логи (Phase 1 / отдельно)
 
 - **ELK Stack на worker**: Elasticsearch + Logstash + Kibana + Filebeat
-- **Возможности**: централизованное хранение, поиск, фильтрация, retention
-- **Документация/команды**: см. README-ELK-DEPLOYMENT.md
+- **Оптимизация логов**: ILM hot-warm-cold-delete, compression (до 70% экономия), шумоподавление 
+- **Бэкапы**: MinIO snapshots (daily, retention 14d)
+- **Документация**: [README-LOGGING-OPTIMIZATION.md](README-LOGGING-OPTIMIZATION.md)
 
 ## 🔍 Трейсинг (Phase 3)
 
@@ -112,22 +133,40 @@ python3 scripts/deploy_all_improved.py --domain cockpit.work.gd --email artur.ko
 ## 🛠️ Управляющие скрипты
 
 | Скрипт | Назначение |
-|--------|------------|
-| deploy_all_improved.py | Базовый оптимизированный деплой кластера |
+|--------|-----------|
+| **check_dependencies.sh** | **🔍 Проверка всех зависимостей перед развертыванием** |
+| **auto_fix_dependencies.sh** | **🔧 Автоматическое исправление зависимостей** |
+| deploy_all_optimized.py | Базовый оптимизированный деплой кластера |
 | deploy_enterprise_stack.py | Enterprise улучшения (ELK, KEDA, ArgoCD, Istio, Jaeger, OPA, Falco) |
-| deploy_elk_on_worker.py | Развертывание ELK Stack на worker |
+| deploy_elk_on_worker.py | Развертывание ELK Stack на worker с оптимизациями |
+| es_configure_optimization.py | Оптимизация Elasticsearch (ILM, SLM, compression) |
 | cluster_optimizer.py | Проверки/оптимизации/отчеты по кластеру |
 | production_hardening.py | Расширенный hardening безопасности |
 | setup_memory_swap.sh | Настройка ZRAM 1G + swap 8G для master |
 
 ## 🔄 Жизненный цикл и обслуживание
 
-- **Еженедельно**: `python3 scripts/cluster_optimizer.py --check`
-- **Ежемесячно**: `python3 scripts/cluster_optimizer.py --apply`
-- **Отчеты**: `python3 scripts/cluster_optimizer.py --report --output monthly_report.json`
+- **Еженедельно**: проверка зависимостей и статуса кластера
+```bash
+./scripts/check_dependencies.sh
+kubectl get pods -A | grep -v Running  # Найти проблемные pods
+```
 
-## 🚨 Траблшутинг (быстро)
+- **Ежемесячно**: проверка логов и ресурсов
+```bash
+# Проверка ELK оптимизации
+kubectl port-forward -n logging deployment/elasticsearch 9200:9200 &
+curl 'localhost:9200/_cat/indices?v&s=index'
+curl 'localhost:9200/_ilm/policy'
+```
 
+## 🚨 Траблшутинг
+
+**Если что-то сломалось - см. [README-TROUBLESHOOTING.md](README-TROUBLESHOOTING.md)**
+
+**Быстрые команды:**
+- **Проверка зависимостей**: `./scripts/check_dependencies.sh`
+- **Auto-fix**: `sudo ./scripts/auto_fix_dependencies.sh`
 - **TLS/сертификаты**:
 ```bash
 kubectl describe clusterissuer letsencrypt-prod
@@ -147,12 +186,23 @@ curl -k https://MASTER_IP:6443/ping
 tailscale status
 ```
 
-## 📚 Дополнительно
+## 📚 Дополнительная документация
 
-- **README-ELK-DEPLOYMENT.md** — подробности по логированию
-- **README-OVERVIEW.md** — краткая памятка по развертыванию
-- **README-HARDWARE.md** — детали железа и апгрейдов
+- **[README-LOGGING-OPTIMIZATION.md](README-LOGGING-OPTIMIZATION.md)** — подробное описание оптимизации логов (ILM, compression, snapshots)
+- **[README-TROUBLESHOOTING.md](README-TROUBLESHOOTING.md)** — comprehensive troubleshooting guide для всех компонентов
+- **[README-ELK-DEPLOYMENT.md](README-ELK-DEPLOYMENT.md)** — подробности по развертыванию ELK Stack  
+- **[README-OVERVIEW.md](README-OVERVIEW.md)** — краткая памятка по развертыванию
+- **[README-HARDWARE.md](README-HARDWARE.md)** — детали железа и апгрейдов
 
 ---
 
-**TL;DR**: Гибридный K3S с in‑cluster TLS, мониторингом, **централизованными логами**, **GitOps**, **авто‑масштабированием** и **service mesh**. Быстрый старт за 10 минут, enterprise‑фичи за несколько команд.
+## 🎯 TL;DR
+
+**Готов к production гибридный K3S с enterprise-grade логированием:**
+
+1. **Проверь зависимости**: `./scripts/check_dependencies.sh`
+2. **Базовый кластер**: `python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --gpu true`
+3. **Enterprise фичи**: `python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase all`
+4. **Если проблемы**: [README-TROUBLESHOOTING.md](README-TROUBLESHOOTING.md)
+
+**🔥 Результат**: GitOps, Service Mesh, оптимизированные логи с compression/ILM/snapshots, auto-scaling, monitoring — всё enterprise-grade за 15 минут! 🚀
