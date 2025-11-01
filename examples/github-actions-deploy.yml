@@ -1,0 +1,210 @@
+# GitHub Actions Workflow для автоматического деплоя сервиса
+# Поместить в .github/workflows/deploy.yml в репозитории сервиса
+
+name: Build and Deploy Service
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  DOCKER_REGISTRY: docker.io  # или ghcr.io для GitHub Container Registry
+  SERVICE_NAME: my-service     # Название сервиса
+  KUBE_NAMESPACE: production   # или staging
+  
+  # Конфигурация Kubernetes
+  KUBE_SERVER: https://your-vps-tailscale-ip:6443  # или публичный IP
+  DOMAIN_BASE: ${{ vars.DOMAIN_BASE }}  # cockpit.work.gd
+
+jobs:
+  # Тесты на каждый push/PR
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js / Python / Go
+      uses: actions/setup-node@v4  # или actions/setup-python@v4, actions/setup-go@v4
+      with:
+        node-version: '18'  # или python-version: '3.11', go-version: '1.21'
+    
+    - name: Install dependencies
+      run: |
+        npm ci  # или pip install -r requirements.txt, go mod download
+    
+    - name: Run unit tests
+      run: |
+        npm test  # или pytest, go test ./...
+    
+    - name: Run integration tests
+      run: |
+        docker-compose -f docker-compose.test.yml up --abort-on-container-exit
+        docker-compose -f docker-compose.test.yml down
+
+  # Билд и деплой только на main
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    # Билд Docker образа
+    - name: Build Docker image
+      run: |
+        docker build -t ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
+        docker build -t ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.SERVICE_NAME }}:latest .
+    
+    # Push в Docker Hub
+    - name: Push to Docker Hub
+      run: |
+        echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login ${{ env.DOCKER_REGISTRY }} -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+        docker push ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+        docker push ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.SERVICE_NAME }}:latest
+    
+    # Настройка kubectl
+    - name: Setup kubectl
+      run: |
+        # Метод 1: Через kubeconfig (base64)
+        echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > /tmp/kubeconfig
+        export KUBECONFIG=/tmp/kubeconfig
+        
+        # Метод 2: Через ServiceAccount токен (более безопасно)
+        # kubectl config set-cluster k3s --server=${{ env.KUBE_SERVER }} --insecure-skip-tls-verify=true
+        # kubectl config set-credentials cicd --token=${{ secrets.KUBE_TOKEN }}
+        # kubectl config set-context k3s --cluster=k3s --user=cicd
+        # kubectl config use-context k3s
+        
+        kubectl version --client
+        kubectl cluster-info
+    
+    # Обновление deployment
+    - name: Deploy to Kubernetes
+      env:
+        KUBECONFIG: /tmp/kubeconfig
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Метод 1: Обновление существующего deployment
+        kubectl set image deployment/${{ env.SERVICE_NAME }} ${{ env.SERVICE_NAME }}=${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.SERVICE_NAME }}:${IMAGE_TAG} -n ${{ env.KUBE_NAMESPACE }}
+        
+        # Метод 2: Применение манифестов (envsubst для подстановки)
+        # export IMAGE_TAG=${IMAGE_TAG}
+        # export SERVICE_NAME=${{ env.SERVICE_NAME }}
+        # export DOMAIN_BASE=${{ env.DOMAIN_BASE }}
+        # envsubst < k8s/deployment.yaml | kubectl apply -f -
+        # envsubst < k8s/service.yaml | kubectl apply -f -
+        # envsubst < k8s/ingress.yaml | kubectl apply -f -
+        
+        # Ожидание успешного rollout
+        kubectl rollout status deployment/${{ env.SERVICE_NAME }} -n ${{ env.KUBE_NAMESPACE }} --timeout=300s
+    
+    # Health check
+    - name: Health check
+      env:
+        KUBECONFIG: /tmp/kubeconfig
+      run: |
+        # Проверяем что поды здоровы
+        kubectl get pods -n ${{ env.KUBE_NAMESPACE }} -l app=${{ env.SERVICE_NAME }}
+        
+        # HTTP health check
+        sleep 10  # Даем время на старт
+        curl -f https://${{ env.SERVICE_NAME }}.${{ env.DOMAIN_BASE }}/health || exit 1
+    
+    # Уведомление о успешном деплое
+    - name: Notify success
+      if: success()
+      run: |
+        echo "🎉 Service ${{ env.SERVICE_NAME }} deployed successfully!"
+        echo "URL: https://${{ env.SERVICE_NAME }}.${{ env.DOMAIN_BASE }}"
+        echo "Image: ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+        
+        # Опционально: Slack/Discord уведомление
+        # curl -X POST -H 'Content-type: application/json' \
+        #   --data '{"text":"🚀 ${{ env.SERVICE_NAME }} deployed: ${{ github.sha }}"}' \
+        #   ${{ secrets.SLACK_WEBHOOK_URL }}
+    
+    # Rollback при ошибке
+    - name: Rollback on failure
+      if: failure()
+      env:
+        KUBECONFIG: /tmp/kubeconfig
+      run: |
+        echo "❌ Deployment failed, rolling back..."
+        kubectl rollout undo deployment/${{ env.SERVICE_NAME }} -n ${{ env.KUBE_NAMESPACE }}
+        kubectl rollout status deployment/${{ env.SERVICE_NAME }} -n ${{ env.KUBE_NAMESPACE }} --timeout=180s
+        
+        # Опционально: Уведомление об ошибке
+        # curl -X POST -H 'Content-type: application/json' \
+        #   --data '{"text":"❌ ${{ env.SERVICE_NAME }} deployment failed and rolled back"}' \
+        #   ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Опционально: Настройка auto-scaling при первом деплое
+  setup-scaling:
+    needs: build-and-deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup kubectl
+      run: |
+        echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > /tmp/kubeconfig
+        export KUBECONFIG=/tmp/kubeconfig
+    
+    - name: Apply HPA and KEDA ScaledObject
+      env:
+        KUBECONFIG: /tmp/kubeconfig
+      run: |
+        # Пример HPA
+        kubectl apply -f - <<EOF
+        apiVersion: autoscaling/v2
+        kind: HorizontalPodAutoscaler
+        metadata:
+          name: ${{ env.SERVICE_NAME }}-hpa
+          namespace: ${{ env.KUBE_NAMESPACE }}
+        spec:
+          scaleTargetRef:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: ${{ env.SERVICE_NAME }}
+          minReplicas: 2
+          maxReplicas: 10
+          metrics:
+          - type: Resource
+            resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 70
+          - type: Resource
+            resource:
+              name: memory
+              target:
+                type: Utilization
+                averageUtilization: 80
+        EOF
+        
+        # Пример KEDA ScaledObject (если нужно event-driven scaling)
+        # kubectl apply -f - <<EOF
+        # apiVersion: keda.sh/v1alpha1
+        # kind: ScaledObject
+        # metadata:
+        #   name: ${{ env.SERVICE_NAME }}-scaledobject
+        #   namespace: ${{ env.KUBE_NAMESPACE }}
+        # spec:
+        #   scaleTargetRef:
+        #     name: ${{ env.SERVICE_NAME }}
+        #   minReplicaCount: 1
+        #   maxReplicaCount: 20
+        #   triggers:
+        #   - type: prometheus
+        #     metadata:
+        #       serverAddress: http://prometheus.monitoring.svc:9090
+        #       metricName: http_requests_per_second
+        #       threshold: "100"
+        #       query: sum(rate(http_requests_total{job="${{ env.SERVICE_NAME }}"}[1m]))
+        # EOF
