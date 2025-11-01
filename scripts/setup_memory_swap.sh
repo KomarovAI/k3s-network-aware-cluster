@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Configure 1G ZRAM (priority 150) and 4G swapfile (priority 50)
+# Configure 1G ZRAM (priority 150) and 8G swapfile (priority 50)
 # Safe to run multiple times (idempotent)
 
 echo "[ZRAM] Installing zram-tools..."
@@ -29,11 +29,11 @@ else
   swapon -p 150 /dev/zram0 || true
 fi
 
-echo "[SWAPFILE] Ensuring 4G swapfile with priority 50..."
+echo "[SWAPFILE] Ensuring 8G swapfile with priority 50..."
 SWAPFILE=/swapfile
 if ! grep -q "^/swapfile" /etc/fstab 2>/dev/null; then
   if [ ! -f "$SWAPFILE" ]; then
-    fallocate -l 4G "$SWAPFILE" || dd if=/dev/zero of="$SWAPFILE" bs=1M count=4096
+    fallocate -l 8G "$SWAPFILE" || dd if=/dev/zero of="$SWAPFILE" bs=1M count=8192
     chmod 600 "$SWAPFILE"
     mkswap "$SWAPFILE"
   fi
