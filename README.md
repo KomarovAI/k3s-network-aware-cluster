@@ -19,14 +19,15 @@
 ## 🏗️ Архитектура и железо
 
 ### Профиль конфигурации
-- **VPS (master)**: 3 vCPU, 4 GB RAM, 100 GB NVMe, 10 Gbps (1.25 ГБ/с)
+- **VPS (master)**: 3 vCPU, 4 GB RAM, 100 GB NVMe, **10 Gbps (1.25 ГБ/с)**
   - Роль: control plane + ingress + TLS
 - **Home PC (worker)**: 26 CPU, 64 GB RAM, 1 TB NVMe, RTX 3090
   - Роль: мониторинг, логирование, GitOps, mesh, tracing, тяжелые сервисы
-  - Соединение с VPS: ~10 МБ/с (Tailscale)
+  - Соединение с VPS: ~10 МБ/с (Tailscale, межузловая связь)
+  - Доступ в интернет: **100 Мбит/с** (внешний выход worker)
 
 ### Ключевые оптимизации
-- **Сеть**: TCP BBR, gzip/brotli, APF (Priority-and-Fairness), 10 Gbps enterprise канал
+- **Сеть**: TCP BBR, gzip/brotli, APF (Priority-and-Fairness), 10 Gbps enterprise канал на VPS
 - **Ресурсы**: VPA, image GC, registry cache
 - **Память master**: ZRAM 1GB + swap 8GB (pri: 150/50)
 - **Безопасность**: CIS Benchmark, NSA/CISA
