@@ -1,19 +1,19 @@
 # K3S Enhanced Hybrid Cluster 🚀
 
-> Production-ready K3S cluster for enhanced VPS (3 vCPU, 4GB RAM, 100GB NVMe, 10 Gbps) + single Home PC worker (26 CPU, 64GB RAM, 1TB NVMe, RTX 3090) with in-cluster TLS, monitoring, logging, GitOps, autoscaling, and service mesh.
+> Production-ready K3S cluster for enhanced VPS (3 vCPU, 4GB RAM, 100GB NVMe, 10 Gbps) + single Home PC worker (26 CPU, 64GB RAM, 1TB NVMe, RTX 3090) with in-cluster TLS, monitoring, logging, autoscaling, and service mesh.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Production Ready](https://img.shields.io/badge/Production-Ready-green)](https://github.com/KomarovAI/k3s-network-aware-cluster)
 [![Security](https://img.shields.io/badge/Security-NSA%2FCISA-blue)](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
 [![K3S](https://img.shields.io/badge/K3S-v1.29+-brightgreen)](https://k3s.io/)
 [![CIS Benchmark](https://img.shields.io/badge/CIS-Benchmark-orange)](https://www.cisecurity.org/benchmark/kubernetes)
+[![WSL2 Support](https://img.shields.io/badge/WSL2-Support-blue)](docs/WSL2-SUPPORT.md)
 
 ## 🔗 Обзор
 
 - **Grafana**: https://grafana.cockpit.work.gd
-- **Kubevious**: https://kubevious.cockpit.work.gd
+- **Kubevious**: https://kubevious.cockpit.work.gd  
 - **Kibana (Logs)**: https://kibana.cockpit.work.gd
-- **ArgoCD**: https://argocd.cockpit.work.gd
 - **Jaeger (Tracing)**: https://jaeger.cockpit.work.gd
 
 ## 🏗️ Архитектура и железо
@@ -22,9 +22,19 @@
 - **VPS (master)**: 3 vCPU, 4 GB RAM, 100 GB NVMe, **10 Gbps (1.25 ГБ/с)**
   - Роль: control plane + ingress + TLS
 - **Home PC (worker)**: 26 CPU, 64 GB RAM, 1 TB NVMe, RTX 3090
-  - Роль: мониторинг, логирование, GitOps, mesh, tracing, тяжелые сервисы
+  - Роль: мониторинг, логирование, mesh, tracing, тяжелые сервисы
   - Соединение с VPS: ~10 МБ/с (Tailscale, межузловая связь)
   - Доступ в интернет: **100 Мбит/с** (внешний выход worker)
+
+### 🐧 **WSL2 Support**
+**NEW!** Полная поддержка Windows Subsystem for Linux 2:
+- ✅ Автоматические исправления VXLAN → host-gw
+- ✅ Решение проблем PersistentVolume node affinity  
+- ✅ iptables compatibility fixes
+- ✅ Оптимизация kernel параметров
+
+📚 **Документация**: [WSL2-SUPPORT.md](docs/WSL2-SUPPORT.md)  
+🚀 **Установка на WSL2**: `./scripts/install-worker-wsl2.sh`
 
 ### Оптимизированное распределение
 - **VPS Master (10 Gbps)**: сетевые компоненты (ingress, cert-manager, API Server)
@@ -55,6 +65,15 @@ sudo ./scripts/auto_fix_dependencies.sh
 ```bash
 # После успешной проверки зависимостей
 python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --gpu true
+```
+
+### 🐧 Вариант 1b: Worker на WSL2
+```bash
+# На WSL2 машине (Windows)
+git clone https://github.com/KomarovAI/k3s-network-aware-cluster.git
+cd k3s-network-aware-cluster
+chmod +x scripts/install-worker-wsl2.sh
+./scripts/install-worker-wsl2.sh
 ```
 
 ### Вариант 2: Enterprise улучшения (по фазам)
@@ -113,140 +132,39 @@ python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.k
 - ✅ **ServiceAccount** `cicd-deploy` с RBAC (безопасный деплой из CI/CD)
 - ✅ **Istio** (опционально): sidecar injection, mTLS, advanced routing
 
-### 🔧 Настройка для новой команды/сервиса
+🔗 **Полное руководство по CI/CD**: [README-CI-CD-SETUP.md](README-CI-CD-SETUP.md)
 
-#### 1. Секреты в репозитории сервиса (GitHub → Settings → Secrets and variables → Actions):
+### 🎯 Простой CI/CD без GitOps
 
-**Repository Secrets:**
-```
-DOCKERHUB_USERNAME=your_username
-DOCKERHUB_TOKEN=dckr_pat_xxxxxxxxxx
-KUBE_TOKEN=eyJhbGciOiJSUzI1NiIs...  # Получить от платформы (см. ниже)
-```
-
-**Repository Variables:**
-```
-DOMAIN_BASE=cockpit.work.gd
-KUBE_SERVER=https://your-vps-tailscale-ip:6443
-```
-
-#### 2. Получение KUBE_TOKEN (делает платформа один раз):
-```bash
-# В кластере после установки Phase 2
-kubectl create token cicd-deploy --duration=8760h
-# Скопируйте токен в KUBE_TOKEN каждого сервисного репозитория
-```
-
-#### 3. Структура репозитория сервиса:
-```
-my-service/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml          # GitHub Actions workflow
-├── k8s/
-│   ├── deployment.yaml         # Kubernetes manifests
-│   ├── service.yaml
-│   └── ingress.yaml
-├── src/                        # Код сервиса
-├── tests/                      # Тесты
-├── Dockerfile
-└── docker-compose.test.yml     # Интеграционные тесты
-```
-
-#### 4. Готовые шаблоны (копировать из платформы):
-```bash
-# GitHub Actions workflow
-curl -o .github/workflows/deploy.yml \
-  https://raw.githubusercontent.com/KomarovAI/k3s-network-aware-cluster/feature/vps-optimization/examples/github-actions-deploy.yml
-
-# Kubernetes manifests
-curl -o k8s/deployment.yaml \
-  https://raw.githubusercontent.com/KomarovAI/k3s-network-aware-cluster/feature/vps-optimization/examples/service-manifests-template/deployment.yaml
-  
-curl -o k8s/service.yaml \
-  https://raw.githubusercontent.com/KomarovAI/k3s-network-aware-cluster/feature/vps-optimization/examples/service-manifests-template/service.yaml
-  
-curl -o k8s/ingress.yaml \
-  https://raw.githubusercontent.com/KomarovAI/k3s-network-aware-cluster/feature/vps-optimization/examples/service-manifests-template/ingress.yaml
-
-# Отредактировать переменные: SERVICE_NAME, KUBE_NAMESPACE
-```
-
-### 🎯 Как работает пайплайн сервиса
-
-```bash
-git push origin main
-# ↓ GitHub Actions автоматически:
-# ✅ Запустит тесты (юнит + интеграционные)
-# ✅ Соберет Docker образ
-# ✅ Запушит в Docker Hub
-# ✅ Обновит кластер (kubectl set image)
-# ✅ Проверит rollout status
-# ✅ Выполнит health-check
-# 🎉 Сервис обновлен и доступен!
-```
-
-### 📊 Паттерны деплоя
-
-**А. Простой сервис** (статический фронтенд, API):
 ```yaml
-# В GitHub Actions:
-kubectl set image deployment/my-service my-service=komarovai/my-service:${{ github.sha }} -n production
-kubectl rollout status deployment/my-service -n production --timeout=300s
+# .github/workflows/deploy.yml
+name: Direct Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build & Deploy
+        run: |
+          # Build Docker image
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/my-service:${{ github.sha }} .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/my-service:${{ github.sha }}
+          
+          # Direct kubectl deploy (no GitOps)
+          kubectl set image deployment/my-service \
+            my-service=${{ secrets.DOCKERHUB_USERNAME }}/my-service:${{ github.sha }} \
+            -n production
+          kubectl rollout status deployment/my-service -n production
 ```
 
-**Б. Сервис с базой данных**:
-```yaml
-# 1. Миграции БД (если нужны)
-kubectl run migration-${{ github.sha }} --rm -i --restart=Never \
-  --image=komarovai/my-service:${{ github.sha }} \
-  --env="DB_URL=${{ secrets.DB_URL }}" \
-  -- python manage.py migrate
-
-# 2. Обновление сервиса
-kubectl set image deployment/my-service my-service=komarovai/my-service:${{ github.sha }} -n production
-```
-
-**В. Микросервисная архитектура** (несколько компонентов):
-```yaml
-# Параллельное обновление всех компонентов
-kubectl set image deployment/api-service api-service=komarovai/api:${{ github.sha }} -n production &
-kubectl set image deployment/worker-service worker-service=komarovai/worker:${{ github.sha }} -n production &
-kubectl set image deployment/frontend frontend=komarovai/frontend:${{ github.sha }} -n production &
-wait
-```
-
-### 🔍 Что получаете автоматически
-
-#### После деплоя каждого сервиса:
-- ✅ **https://SERVICE_NAME.cockpit.work.gd** — автоматический TLS
-- ✅ **Централизованные логи** в Kibana (автосбор через Filebeat)
-- ✅ **Метрики** в Grafana unified dashboard (при label `monitoring: enabled`)
-- ✅ **Auto-scaling** (HPA/KEDA по CPU/памяти/очередям/cron)
-- ✅ **Service mesh** (mTLS, canary, traffic management через Istio)
-- ✅ **Distributed tracing** (Jaeger через Istio sidecar)
-- ✅ **Security policies** (OPA/Falco автоматические проверки)
-
-#### Единый дашборд для всех сервисов:
-🎯 **https://grafana.cockpit.work.gd** → **"Cluster Enterprise Overview"**
-- Все сервисы, CPU, память, сеть, auto-scaling, логи, трейсы в **одном месте**
-
-### 🛠️ Готовые шаблоны и примеры
-
-| Файл | Назначение |
-|------|------------|
-| **[examples/github-actions-deploy.yml](examples/github-actions-deploy.yml)** | **GitHub Actions workflow для сервиса** |
-| **[examples/service-manifests-template/](examples/service-manifests-template/)** | **Готовые Kubernetes манифесты** |
-| **[README-CI-CD-SETUP.md](README-CI-CD-SETUP.md)** | **Полное руководство по CI/CD** |
-
-### 🚀 Быстрый старт для новой команды
-
-1. **Создайте репозиторий сервиса** и добавьте secrets/variables (см. выше)
-2. **Скопируйте шаблоны** в свой репозиторий
-3. **Отредактируйте переменные**: SERVICE_NAME, KUBE_NAMESPACE
-4. **git push** → автоматический деплой!
-
-**Подробности**: [README-CI-CD-SETUP.md](README-CI-CD-SETUP.md)
+**Преимущества прямого деплоя:**
+- ✅ **Простота**: один шаг build → deploy
+- ✅ **Надежность**: меньше движущихся частей
+- ✅ **Скорость**: мгновенный деплой без GitOps задержек
+- ✅ **Debugging**: прямая трассировка проблем
 
 ---
 
@@ -255,12 +173,6 @@ wait
 - **cert-manager**: автоматические Let's Encrypt сертификаты (HTTP-01/DNS-01)
 - **ingress-nginx**: безопасная конфигурация (TLS 1.2/1.3, современные шифры)
 - **Istio (Phase 2)**: mTLS, canary, traffic shifting, circuit breakers, retries, mirroring
-
-## 📦 GitOps и деплой
-
-- **ArgoCD (опционально)**: git push → автоматический деплой, one-click rollback
-- **Прямой CI/CD (рекомендуемо)**: GitHub Actions → Docker Hub → kubectl (надежнее)
-- **Helm/Helmfile**: переиспользуемые шаблоны, версии, быстрый деплой 
 
 ## ⚖️ Авто‑масштабирование и ресурсы
 
@@ -300,19 +212,35 @@ wait
 - **sysctl**: vm.swappiness=60, vm.vfs_cache_pressure=120
 - **Итог**: ~13.8GB эффективной памяти, стабильность при пиках
 
-## 🛠️ Управляющие скрипты
+## 🛠️ Управляющие скрипты (оптимизированные)
 
-| Скрипт | Назначение |
-|--------|------------|
-| **check_dependencies.sh** | **🔍 Проверка всех зависимостей перед развертыванием** |
-| **auto_fix_dependencies.sh** | **🔧 Автоматическое исправление зависимостей** |
-| deploy_all_optimized.py | Базовый оптимизированный деплой кластера |
-| deploy_enterprise_stack.py | Enterprise улучшения (ELK, KEDA, Istio, Jaeger, OPA, Falco) |
-| deploy_elk_on_worker.py | Развертывание ELK Stack на worker с оптимизациями |
-| es_configure_optimization.py | Оптимизация Elasticsearch (ILM, SLM, compression) |
-| cluster_optimizer.py | Проверки/оптимизации/отчеты по кластеру |
-| production_hardening.py | Расширенный hardening безопасности |
-| setup_memory_swap.sh | Настройка ZRAM 1G + swap 8G для master |
+| Скрипт | Назначение | Статус |
+|--------|-----------|--------|
+| **check_dependencies.sh** | **🔍 Проверка всех зависимостей перед развертыванием** | ✅ Основной |
+| **auto_fix_dependencies.sh** | **🔧 Автоматическое исправление зависимостей** | ✅ Основной |
+| **deploy_all_optimized.py** | **🚀 Базовое развертывание кластера (production-ready)** | ✅ Основной |
+| **deploy_enterprise_stack.py** | **🏢 Enterprise улучшения (ELK, KEDA, CI/CD, безопасность)** | ✅ Основной |
+| **deploy_elk_on_worker.py** | **📊 Развертывание ELK Stack на worker с оптимизациями** | ✅ Специализированный |
+| **es_configure_optimization.py** | **⚙️ Оптимизация Elasticsearch (ILM, SLM, compression)** | ✅ Специализированный |
+| **install_cluster_enhanced.py** | **⚡ Установка базового кластера** | ✅ Основной |
+| **migrate_to_worker.py** | **🔄 Миграция компонентов на worker ноды** | ✅ Утилита |
+| **production_hardening.py** | **🛡️ Расширенный hardening безопасности** | ✅ Безопасность |
+| **cluster_optimizer.py** | **🔧 Проверки/оптимизации/отчеты по кластеру** | ✅ Утилита |
+| **quick_health_check.sh** | **🏥 Быстрая проверка здоровья кластера** | ✅ Утилита |
+| **setup_memory_swap.sh** | **💾 Настройка ZRAM 1G + swap 8G для master** | ✅ Утилита |
+| **wsl2-fixes.sh** | **🐧 WSL2 совместимость и исправления** | ✅ WSL2 |
+| **install-worker-wsl2.sh** | **🐧 Автоматическая установка worker на WSL2** | ✅ WSL2 |
+
+### 📦 Удаленные дубли и устаревшие файлы:
+- ~~deploy_all.py~~ (заменен на deploy_all_optimized.py)
+- ~~deploy_all_improved.py~~ (заменен на deploy_all_optimized.py)  
+- ~~update_deploy_all_with_elk.py~~ (устаревший)
+- ~~cleanup_and_optimize.py~~ (объединен с cluster_optimizer.py)
+- ~~_memory_provision.py~~ (функции в setup_memory_swap.sh)
+- ~~_patch_install_for_memory.py~~ (функции в setup_memory_swap.sh)
+- ~~ensure_memory_hook.sh~~ (функции в setup_memory_swap.sh)
+
+**Результат очистки: сокращено с 20 до 14 скриптов (экономия 30%)**
 
 ## 🔄 Жизненный цикл и обслуживание
 
@@ -330,13 +258,19 @@ curl 'localhost:9200/_cat/indices?v&s=index'
 curl 'localhost:9200/_ilm/policy'
 ```
 
-## 🚨 Траблшутинг
+- **Оптимизация**: анализ и улучшение производительности
+```bash
+python3 scripts/cluster_optimizer.py --optimize-all
+python3 scripts/production_hardening.py --apply-all
+```
 
-**Если что-то сломалось - см. [README-TROUBLESHOOTING.md](README-TROUBLESHOOTING.md)**
+## 🚨 Траблшутинг
 
 **Быстрые команды:**
 - **Проверка зависимостей**: `./scripts/check_dependencies.sh`
 - **Auto-fix**: `sudo ./scripts/auto_fix_dependencies.sh`
+- **Здоровье кластера**: `./scripts/quick_health_check.sh`
+- **WSL2 проблемы**: `sudo ./scripts/wsl2-fixes.sh`
 - **TLS/сертификаты**:
 ```bash
 kubectl describe clusterissuer letsencrypt-prod
@@ -358,10 +292,8 @@ tailscale status
 
 ## 📚 Дополнительная документация
 
+- **[docs/WSL2-SUPPORT.md](docs/WSL2-SUPPORT.md)** — полная поддержка WSL2 с автоматическими исправлениями
 - **[README-LOGGING-OPTIMIZATION.md](README-LOGGING-OPTIMIZATION.md)** — подробное описание оптимизации логов (ILM, compression, snapshots)
-- **[README-TROUBLESHOOTING.md](README-TROUBLESHOOTING.md)** — comprehensive troubleshooting guide для всех компонентов
-- **[README-ELK-DEPLOYMENT.md](README-ELK-DEPLOYMENT.md)** — подробности по развертыванию ELK Stack  
-- **[README-OVERVIEW.md](README-OVERVIEW.md)** — краткая памятка по развертыванию
 - **[README-CI-CD-SETUP.md](README-CI-CD-SETUP.md)** — полное руководство по настройке CI/CD для сервисов
 - **[README-HARDWARE.md](README-HARDWARE.md)** — детали железа и апгрейдов
 
@@ -374,7 +306,20 @@ tailscale status
 1. **Проверь зависимости**: `./scripts/check_dependencies.sh`
 2. **Базовый кластер**: `python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --gpu true`
 3. **Enterprise фичи**: `python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase all`
-4. **Настройте CI/CD**: [README-CI-CD-SETUP.md](README-CI-CD-SETUP.md)
-5. **Если проблемы**: [README-TROUBLESHOOTING.md](README-TROUBLESHOOTING.md)
+4. **Настройте CI/CD**: Используйте шаблоны из examples/ для каждого сервиса
+5. **Если проблемы**: `python3 scripts/cluster_optimizer.py --check`
 
 **🔥 Результат**: Сетевая платформа для автоматического деплоя сервисов через GitHub Actions → Docker Hub → kubectl. Единый мониторинг, логи, TLS, auto-scaling — всё enterprise-grade за 15 минут! 🚀
+
+---
+
+### 🏆 Особенности проекта
+
+- ✅ **Production-Ready**: CIS Benchmark + NSA/CISA hardening
+- ✅ **Hybrid Cloud**: VPS (сеть) + Home PC (compute) 
+- ✅ **Enterprise Monitoring**: Prometheus + Grafana + ELK Stack
+- ✅ **Auto-scaling**: KEDA + HPA + VPA
+- ✅ **Security**: Pod Security Standards + RBAC + Network Policies
+- ✅ **WSL2 Support**: Полная совместимость с Windows
+- ✅ **Direct CI/CD**: GitHub Actions → kubectl (без GitOps сложности)
+- ✅ **Cost Effective**: $10-20/месяц VPS vs $200-500/месяц managed Kubernetes
