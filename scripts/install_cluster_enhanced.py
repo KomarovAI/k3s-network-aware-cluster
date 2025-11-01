@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 K3S Enhanced Cluster Installer
-Production-ready K3S cluster for VPS (3 vCPU, 4GB RAM, 100GB) + Home PC workers
+Production-ready K3S cluster for Enhanced VPS (3 vCPU, 4GB RAM, 100GB, 10 Gbps) + Home PC workers
 
 Usage: 
-  python3 install_cluster_enhanced.py --mode master  # On VPS
+  python3 install_cluster_enhanced.py --mode master  # On Enhanced VPS
   python3 install_cluster_enhanced.py --mode worker --master-ip IP --token TOKEN  # On Home PC
 """
 
@@ -27,7 +27,8 @@ class EnhancedK3SInstaller:
             'cpu_cores': 3,
             'memory_gb': 4,
             'storage_gb': 100,
-            'network_speed': '1000mbps'  # Enhanced VPS
+            'network_speed': '10gbps',        # 10 Гбит/с
+            'network_throughput': '1250MB/s'  # 1.25 ГБ/с реальная скорость
         }
         
     def check_prerequisites(self) -> bool:
@@ -87,14 +88,14 @@ class EnhancedK3SInstaller:
         return True
     
     def install_enhanced_master(self) -> bool:
-        """Install K3S master optimized for enhanced VPS (3 vCPU, 4GB RAM)"""
-        print("🚀 Installing K3S master for enhanced VPS...")
-        print(f"   VPS Specs: {self.vps_specs['cpu_cores']} vCPU, {self.vps_specs['memory_gb']}GB RAM, {self.vps_specs['storage_gb']}GB storage")
+        """Install K3S master optimized for Enhanced VPS (3 vCPU, 4GB RAM, 10 Gbps)"""
+        print("🚀 Installing K3S master for Enhanced VPS...")
+        print(f"   Enhanced VPS: {self.vps_specs['cpu_cores']} vCPU, {self.vps_specs['memory_gb']}GB RAM, {self.vps_specs['network_speed']} ({self.vps_specs['network_throughput']})")
         
-        # System optimizations for enhanced VPS
+        # System optimizations for Enhanced VPS
         self._apply_enhanced_system_optimizations()
         
-        # Create K3S configuration for enhanced VPS
+        # Create K3S configuration for Enhanced VPS
         self._create_enhanced_k3s_config()
         
         # Install K3S with enhanced configuration
@@ -188,11 +189,11 @@ class EnhancedK3SInstaller:
             
             print(f"📊 System: {cpu_count} CPU cores, {mem_gb:.1f}GB RAM")
             
-            # For VPS master: minimum validation
+            # For Enhanced VPS master: validation
             if cpu_count < 2:
-                print(f"⚠️  Warning: {cpu_count} CPU cores. Recommended: 3+ for VPS master")
+                print(f"⚠️  Warning: {cpu_count} CPU cores. Enhanced VPS should have 3+ cores")
             if mem_gb < 2:
-                print(f"⚠️  Warning: {mem_gb:.1f}GB RAM. Recommended: 4GB+ for VPS master")
+                print(f"⚠️  Warning: {mem_gb:.1f}GB RAM. Enhanced VPS should have 4GB+ RAM")
             
             return True
             
@@ -201,8 +202,8 @@ class EnhancedK3SInstaller:
             return True  # Continue anyway
     
     def _apply_enhanced_system_optimizations(self) -> None:
-        """Apply system optimizations for enhanced VPS"""
-        print("🔧 Applying enhanced VPS system optimizations...")
+        """Apply system optimizations for Enhanced VPS with 10 Gbps network"""
+        print("🔧 Applying Enhanced VPS system optimizations (10 Gbps network)...")
         
         optimizations = [
             # Memory optimization for 4GB VPS
@@ -219,9 +220,17 @@ class EnhancedK3SInstaller:
             'echo "net.core.default_qdisc=fq" | sudo tee -a /etc/sysctl.conf',
             'echo "net.ipv4.tcp_congestion_control=bbr" | sudo tee -a /etc/sysctl.conf',
             
-            # Network buffers for enhanced VPS
-            'echo "net.core.rmem_max=16777216" | sudo tee -a /etc/sysctl.conf',
-            'echo "net.core.wmem_max=16777216" | sudo tee -a /etc/sysctl.conf',
+            # 10 Gbps network buffer optimization (1.25 GB/s)
+            'echo "net.core.rmem_max=536870912" | sudo tee -a /etc/sysctl.conf',     # 512MB receive buffer
+            'echo "net.core.wmem_max=536870912" | sudo tee -a /etc/sysctl.conf',     # 512MB send buffer
+            'echo "net.ipv4.tcp_rmem=4096 87380 536870912" | sudo tee -a /etc/sysctl.conf',
+            'echo "net.ipv4.tcp_wmem=4096 65536 536870912" | sudo tee -a /etc/sysctl.conf',
+            
+            # Additional 10 Gbps optimizations
+            'echo "net.core.netdev_max_backlog=5000" | sudo tee -a /etc/sysctl.conf',
+            'echo "net.ipv4.tcp_window_scaling=1" | sudo tee -a /etc/sysctl.conf',
+            'echo "net.ipv4.tcp_timestamps=1" | sudo tee -a /etc/sysctl.conf',
+            'echo "net.ipv4.tcp_sack=1" | sudo tee -a /etc/sysctl.conf',
             
             # Apply all optimizations
             'sudo sysctl -p'
@@ -233,12 +242,12 @@ class EnhancedK3SInstaller:
                 print(f"   ⚠️  Warning: {cmd} failed")
     
     def _create_enhanced_k3s_config(self) -> None:
-        """Create K3S configuration optimized for enhanced VPS"""
+        """Create K3S configuration optimized for Enhanced VPS (10 Gbps)"""
         config_dir = Path('/etc/rancher/k3s')
         config_dir.mkdir(parents=True, exist_ok=True)
         
-        # Enhanced configuration for 3 vCPU, 4GB RAM VPS
-        config_content = f"""# Enhanced K3S configuration for VPS (3 vCPU, 4GB RAM, 100GB)
+        # Enhanced configuration for 3 vCPU, 4GB RAM, 10 Gbps VPS
+        config_content = f"""# Enhanced K3S configuration for VPS (3 vCPU, 4GB RAM, 100GB, 10 Gbps)
 write-kubeconfig-mode: 644
 
 # Network configuration
@@ -257,15 +266,15 @@ disable:
   - servicelb     # Use external LB or NodePort
   - local-storage # Use custom storage classes
 
-# Master node isolation (enhanced VPS can handle some system workloads)
+# Master node isolation (enhanced VPS can handle network workloads)
 node-taint:
   - "node-role.kubernetes.io/control-plane=true:NoSchedule"
-  - "vps-enhanced=true:PreferNoSchedule"  # Soft isolation
+  - "network-tier=enhanced:PreferNoSchedule"  # Soft isolation for network workloads
 
-# Enhanced resource configuration for 3 vCPU, 4GB RAM
+# Enhanced resource configuration for 3 vCPU, 4GB RAM, 10 Gbps
 kube-apiserver-arg:
-  - "max-requests-inflight=300"           # Higher with 3 vCPU
-  - "max-mutating-requests-inflight=150"  # 50% of read requests
+  - "max-requests-inflight=400"           # Higher with 10 Gbps network
+  - "max-mutating-requests-inflight=200"  # 50% of read requests
   - "request-timeout=60s"
   - "min-request-timeout=30s"
   - "audit-log-maxage=7"                  # 7 days retention
@@ -273,16 +282,16 @@ kube-apiserver-arg:
   - "audit-log-maxsize=100"               # 100MB files
 
 kube-controller-manager-arg:
-  - "concurrent-deployment-syncs=5"       # Higher concurrency
-  - "concurrent-replicaset-syncs=5"
-  - "concurrent-resource-quota-syncs=5"
-  - "kube-api-qps=100"                    # Higher API rate
-  - "kube-api-burst=200"
+  - "concurrent-deployment-syncs=8"       # Higher concurrency for 10 Gbps
+  - "concurrent-replicaset-syncs=8"
+  - "concurrent-resource-quota-syncs=8"
+  - "kube-api-qps=150"                    # Higher API rate for fast network
+  - "kube-api-burst=300"
 
 kube-scheduler-arg:
   - "v=2"
-  - "kube-api-qps=100"
-  - "kube-api-burst=200"
+  - "kube-api-qps=150"
+  - "kube-api-burst=300"
   - "profile-port=10259"                  # Enable profiling
 
 # Enhanced etcd configuration for 100GB storage
@@ -301,15 +310,15 @@ kubelet-arg:
   - "system-reserved=cpu=300m,memory=800Mi,ephemeral-storage=10Gi"
   - "kube-reserved=cpu=500m,memory=1200Mi,ephemeral-storage=5Gi"
   - "eviction-hard=memory.available<200Mi,nodefs.available<5%"
-  - "serialize-image-pulls=false"         # Parallel pulls
-  - "registry-pull-qps=10"
-  - "registry-burst=20"
+  - "serialize-image-pulls=false"         # Parallel pulls with 10 Gbps
+  - "registry-pull-qps=20"                # Higher pull rate
+  - "registry-burst=40"
 """
         
         with open(config_dir / 'config.yaml', 'w') as f:
             f.write(config_content)
         
-        print(f"✅ Enhanced K3S config created for {self.vps_specs['cpu_cores']} vCPU VPS")
+        print(f"✅ Enhanced K3S config created for {self.vps_specs['network_speed']} VPS")
     
     def _wait_for_k3s_ready(self, timeout: int = 180) -> None:
         """Wait for K3S to be ready with longer timeout for enhanced setup"""
@@ -351,22 +360,23 @@ kubelet-arg:
         print("✅ kubectl access configured")
     
     def _configure_enhanced_master_node(self) -> None:
-        """Configure master node with enhanced VPS labels"""
-        print("🏷️  Configuring enhanced master node...")
+        """Configure master node with Enhanced VPS labels (10 Gbps)"""
+        print("🏷️  Configuring Enhanced VPS master node (10 Gbps)...")
         
-        # Enhanced VPS labels
+        # Enhanced VPS labels with 10 Gbps network
         labels = {
             'node-type': 'vps',
             'role': 'control-plane',
-            'compute-tier': 'enhanced-management',  # Enhanced tier
+            'compute-tier': 'enhanced-networking',  # Enhanced networking tier
             'cpu-cores': str(self.vps_specs['cpu_cores']),
             'memory-gb': str(self.vps_specs['memory_gb']),
             'storage-gb': str(self.vps_specs['storage_gb']),
             'network-speed': self.vps_specs['network_speed'],
-            'network-latency': 'medium',  # Better than basic VPS
+            'network-throughput': self.vps_specs['network_throughput'],
+            'network-latency': 'low',     # Enterprise network quality
             'zone': 'remote',
             'internet-access': 'true',
-            'can-run-system-workloads': 'true',  # Enhanced VPS can handle some workloads
+            'can-run-network-workloads': 'true',  # 10 Gbps can handle network load
             'vps-tier': 'enhanced'
         }
         
@@ -376,20 +386,20 @@ kubelet-arg:
                 f'{key}={value}', '--overwrite'
             ])
         
-        # Enhanced taints (softer isolation due to better resources)
+        # Enhanced taints (network workloads allowed due to 10 Gbps)
         taints = [
             'node-role.kubernetes.io/control-plane=true:NoSchedule',
-            'vps-enhanced=true:PreferNoSchedule'  # Soft taint, allow if needed
+            'network-tier=enhanced:PreferNoSchedule'  # Allow network-intensive workloads
         ]
         
         for taint in taints:
             subprocess.run(['kubectl', 'taint', 'node', self.node_name, taint, '--overwrite'])
         
-        print(f"✅ Enhanced master node {self.node_name} configured")
+        print(f"✅ Enhanced master node {self.node_name} configured (10 Gbps network)")
     
     def _install_enhanced_ingress(self) -> None:
-        """Install NGINX Ingress optimized for enhanced VPS"""
-        print("🌐 Installing enhanced NGINX Ingress...")
+        """Install NGINX Ingress optimized for Enhanced VPS (10 Gbps)"""
+        print("🌐 Installing Enhanced NGINX Ingress (10 Gbps optimized)...")
         
         # Apply standard NGINX Ingress
         subprocess.run([
@@ -400,7 +410,7 @@ kubelet-arg:
         # Wait for ingress deployment
         time.sleep(30)
         
-        # Patch with enhanced resource allocation
+        # Patch with enhanced resource allocation for 10 Gbps
         patch = {
             "spec": {
                 "template": {
@@ -409,12 +419,12 @@ kubelet-arg:
                             "name": "controller",
                             "resources": {
                                 "limits": {
-                                    "cpu": "800m",      # Enhanced VPS can handle more
-                                    "memory": "800Mi"
+                                    "cpu": "1000m",     # Enhanced VPS can handle more with 10 Gbps
+                                    "memory": "1Gi"
                                 },
                                 "requests": {
-                                    "cpu": "400m", 
-                                    "memory": "400Mi"
+                                    "cpu": "500m", 
+                                    "memory": "500Mi"
                                 }
                             }
                         }]
@@ -428,7 +438,7 @@ kubelet-arg:
             '-n', 'ingress-nginx', '--patch', json.dumps(patch)
         ])
         
-        print("✅ Enhanced NGINX Ingress configured")
+        print("✅ Enhanced NGINX Ingress configured (10 Gbps network)")
     
     def _create_enhanced_worker_script(self) -> None:
         """Create optimized worker join script"""
@@ -467,7 +477,7 @@ def main():
         print("🏷️  Applying Home PC worker labels...")
         labels = {{
             "node-type": "home-pc",
-            "role": "worker",
+            "role": "worker", 
             "compute-tier": "workload",
             "network-speed": "1000mbps",
             "network-latency": "low",
@@ -529,8 +539,8 @@ if __name__ == '__main__':
     def show_cluster_info(self) -> None:
         """Show cluster information"""
         print("\n📋 Enhanced Cluster Information:")
-        print(f"   VPS Master: {self.node_name} ({self.tailscale_ip})")
-        print(f"   Specifications: {self.vps_specs['cpu_cores']} vCPU, {self.vps_specs['memory_gb']}GB RAM, {self.vps_specs['storage_gb']}GB")
+        print(f"   Enhanced VPS Master: {self.node_name} ({self.tailscale_ip})")
+        print(f"   Specifications: {self.vps_specs['cpu_cores']} vCPU, {self.vps_specs['memory_gb']}GB RAM, {self.vps_specs['network_speed']} ({self.vps_specs['network_throughput']})")
         print("\n🔗 Next Steps:")
         print("   1. Join worker nodes using ~/join_worker_enhanced.py")
         print("   2. Apply production standards: kubectl apply -f manifests/prod/")
@@ -542,7 +552,7 @@ if __name__ == '__main__':
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Enhanced K3S Cluster Installer (VPS: 3 vCPU, 4GB RAM, 100GB)'
+        description='Enhanced K3S Cluster Installer (Enhanced VPS: 3 vCPU, 4GB RAM, 100GB, 10 Gbps)'
     )
     parser.add_argument('--mode', choices=['master', 'worker'], required=True,
                       help='Installation mode')
