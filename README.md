@@ -26,6 +26,11 @@
   - Соединение с VPS: ~10 МБ/с (Tailscale, межузловая связь)
   - Доступ в интернет: **100 Мбит/с** (внешний выход worker)
 
+### Оптимизированное распределение
+- **VPS Master (10 Gbps)**: сетевые компоненты (ingress, cert-manager, API Server)
+- **Home PC Worker**: вычислительные компоненты (мониторинг, логи, трейсы)
+- **Оптимизация**: максимальное использование преимуществ каждой ноды
+
 ### Ключевые оптимизации
 - **Сеть**: TCP BBR, gzip/brotli, APF (Priority-and-Fairness), 10 Gbps enterprise канал на VPS
 - **Ресурсы**: VPA, image GC, registry cache
@@ -57,7 +62,7 @@ python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.k
 # Phase 1 (критично): ELK + KEDA + monitoring enhancements
 python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase 1
 
-# Phase 2 (важно): ArgoCD GitOps + Istio Service Mesh  
+# Phase 2 (важно): CI/CD Support + Istio Service Mesh  
 python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase 2
 
 # Phase 3 (желательно): Jaeger + OPA Gatekeeper + Falco
@@ -82,6 +87,169 @@ export CF_API_TOKEN="your_cloudflare_token"
 python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --gpu true --dns01
 ```
 
+---
+
+## 🏢 Развертывание сервисов из отдельных репозиториев
+
+> **Платформа предоставляет инфраструктуру (ingress, TLS, мониторинг, логи), а каждый сервис живет в СВОЕМ репозитории с прямым CI/CD через GitHub Actions → Docker Hub → kubectl**
+
+### 📋 Архитектура сервисов
+
+- **Платформенный репозиторий** (этот):
+  - Готовит кластер, ingress-nginx, cert-manager, Grafana/Kibana, KEDA/автомасштабирование, Istio
+  - НЕ хранит коды сервисов или их манифесты
+- **Репозиторий сервиса** (каждый отдельно):
+  - Исходники, Dockerfile, тесты
+  - Kubernetes-манифесты сервиса (deployment/service/ingress)
+  - GitHub Actions workflow для сборки и kubectl деплоя
+
+### ⚡ Что уже настроено в платформе
+
+- ✅ **Авто-TLS** для `*.DOMAIN` (cert-manager, ClusterIssuer)
+- ✅ **Ingress-контроллер** (nginx) на master VPS (10 Gbps)
+- ✅ **Централизованные логи** (ELK) и **мониторинг** (Grafana unified dashboard)
+- ✅ **KEDA/HPA** автомасштабирование
+- ✅ **Namespace** `production`, `staging`
+- ✅ **ServiceAccount** `cicd-deploy` с RBAC (безопасный деплой из CI/CD)
+- ✅ **Istio** (опционально): sidecar injection, mTLS, advanced routing
+
+### 🔧 Настройка для новой команды/сервиса
+
+#### 1. Секреты в репозитории сервиса (GitHub → Settings → Secrets and variables → Actions):
+
+**Repository Secrets:**
+```
+DOCKERHUB_USERNAME=your_username
+DOCKERHUB_TOKEN=dckr_pat_xxxxxxxxxx
+KUBE_TOKEN=eyJhbGciOiJSUzI1NiIs...  # Получить от платформы (см. ниже)
+```
+
+**Repository Variables:**
+```
+DOMAIN_BASE=cockpit.work.gd
+KUBE_SERVER=https://your-vps-tailscale-ip:6443
+```
+
+#### 2. Получение KUBE_TOKEN (делает платформа один раз):
+```bash
+# В кластере после установки Phase 2
+kubectl create token cicd-deploy --duration=8760h
+# Скопируйте токен в KUBE_TOKEN каждого сервисного репозитория
+```
+
+#### 3. Структура репозитория сервиса:
+```
+my-service/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml          # GitHub Actions workflow
+├── k8s/
+│   ├── deployment.yaml         # Kubernetes manifests
+│   ├── service.yaml
+│   └── ingress.yaml
+├── src/                        # Код сервиса
+├── tests/                      # Тесты
+├── Dockerfile
+└── docker-compose.test.yml     # Интеграционные тесты
+```
+
+#### 4. Готовые шаблоны (копировать из платформы):
+```bash
+# GitHub Actions workflow
+curl -o .github/workflows/deploy.yml \
+  https://raw.githubusercontent.com/KomarovAI/k3s-network-aware-cluster/feature/vps-optimization/examples/github-actions-deploy.yml
+
+# Kubernetes manifests
+curl -o k8s/deployment.yaml \
+  https://raw.githubusercontent.com/KomarovAI/k3s-network-aware-cluster/feature/vps-optimization/examples/service-manifests-template/deployment.yaml
+  
+curl -o k8s/service.yaml \
+  https://raw.githubusercontent.com/KomarovAI/k3s-network-aware-cluster/feature/vps-optimization/examples/service-manifests-template/service.yaml
+  
+curl -o k8s/ingress.yaml \
+  https://raw.githubusercontent.com/KomarovAI/k3s-network-aware-cluster/feature/vps-optimization/examples/service-manifests-template/ingress.yaml
+
+# Отредактировать переменные: SERVICE_NAME, KUBE_NAMESPACE
+```
+
+### 🎯 Как работает пайплайн сервиса
+
+```bash
+git push origin main
+# ↓ GitHub Actions автоматически:
+# ✅ Запустит тесты (юнит + интеграционные)
+# ✅ Соберет Docker образ
+# ✅ Запушит в Docker Hub
+# ✅ Обновит кластер (kubectl set image)
+# ✅ Проверит rollout status
+# ✅ Выполнит health-check
+# 🎉 Сервис обновлен и доступен!
+```
+
+### 📊 Паттерны деплоя
+
+**А. Простой сервис** (статический фронтенд, API):
+```yaml
+# В GitHub Actions:
+kubectl set image deployment/my-service my-service=komarovai/my-service:${{ github.sha }} -n production
+kubectl rollout status deployment/my-service -n production --timeout=300s
+```
+
+**Б. Сервис с базой данных**:
+```yaml
+# 1. Миграции БД (если нужны)
+kubectl run migration-${{ github.sha }} --rm -i --restart=Never \
+  --image=komarovai/my-service:${{ github.sha }} \
+  --env="DB_URL=${{ secrets.DB_URL }}" \
+  -- python manage.py migrate
+
+# 2. Обновление сервиса
+kubectl set image deployment/my-service my-service=komarovai/my-service:${{ github.sha }} -n production
+```
+
+**В. Микросервисная архитектура** (несколько компонентов):
+```yaml
+# Параллельное обновление всех компонентов
+kubectl set image deployment/api-service api-service=komarovai/api:${{ github.sha }} -n production &
+kubectl set image deployment/worker-service worker-service=komarovai/worker:${{ github.sha }} -n production &
+kubectl set image deployment/frontend frontend=komarovai/frontend:${{ github.sha }} -n production &
+wait
+```
+
+### 🔍 Что получаете автоматически
+
+#### После деплоя каждого сервиса:
+- ✅ **https://SERVICE_NAME.cockpit.work.gd** — автоматический TLS
+- ✅ **Централизованные логи** в Kibana (автосбор через Filebeat)
+- ✅ **Метрики** в Grafana unified dashboard (при label `monitoring: enabled`)
+- ✅ **Auto-scaling** (HPA/KEDA по CPU/памяти/очередям/cron)
+- ✅ **Service mesh** (mTLS, canary, traffic management через Istio)
+- ✅ **Distributed tracing** (Jaeger через Istio sidecar)
+- ✅ **Security policies** (OPA/Falco автоматические проверки)
+
+#### Единый дашборд для всех сервисов:
+🎯 **https://grafana.cockpit.work.gd** → **"Cluster Enterprise Overview"**
+- Все сервисы, CPU, память, сеть, auto-scaling, логи, трейсы в **одном месте**
+
+### 🛠️ Готовые шаблоны и примеры
+
+| Файл | Назначение |
+|------|------------|
+| **[examples/github-actions-deploy.yml](examples/github-actions-deploy.yml)** | **GitHub Actions workflow для сервиса** |
+| **[examples/service-manifests-template/](examples/service-manifests-template/)** | **Готовые Kubernetes манифесты** |
+| **[README-CI-CD-SETUP.md](README-CI-CD-SETUP.md)** | **Полное руководство по CI/CD** |
+
+### 🚀 Быстрый старт для новой команды
+
+1. **Создайте репозиторий сервиса** и добавьте secrets/variables (см. выше)
+2. **Скопируйте шаблоны** в свой репозиторий
+3. **Отредактируйте переменные**: SERVICE_NAME, KUBE_NAMESPACE
+4. **git push** → автоматический деплой!
+
+**Подробности**: [README-CI-CD-SETUP.md](README-CI-CD-SETUP.md)
+
+---
+
 ## 🌐 TLS, Ingress и Service Mesh
 
 - **cert-manager**: автоматические Let's Encrypt сертификаты (HTTP-01/DNS-01)
@@ -90,7 +258,8 @@ python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.k
 
 ## 📦 GitOps и деплой
 
-- **ArgoCD (Phase 2)**: git push → автоматический деплой, one-click rollback
+- **ArgoCD (опционально)**: git push → автоматический деплой, one-click rollback
+- **Прямой CI/CD (рекомендуемо)**: GitHub Actions → Docker Hub → kubectl (надежнее)
 - **Helm/Helmfile**: переиспользуемые шаблоны, версии, быстрый деплой 
 
 ## ⚖️ Авто‑масштабирование и ресурсы
@@ -138,7 +307,7 @@ python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.k
 | **check_dependencies.sh** | **🔍 Проверка всех зависимостей перед развертыванием** |
 | **auto_fix_dependencies.sh** | **🔧 Автоматическое исправление зависимостей** |
 | deploy_all_optimized.py | Базовый оптимизированный деплой кластера |
-| deploy_enterprise_stack.py | Enterprise улучшения (ELK, KEDA, ArgoCD, Istio, Jaeger, OPA, Falco) |
+| deploy_enterprise_stack.py | Enterprise улучшения (ELK, KEDA, Istio, Jaeger, OPA, Falco) |
 | deploy_elk_on_worker.py | Развертывание ELK Stack на worker с оптимизациями |
 | es_configure_optimization.py | Оптимизация Elasticsearch (ILM, SLM, compression) |
 | cluster_optimizer.py | Проверки/оптимизации/отчеты по кластеру |
@@ -193,17 +362,19 @@ tailscale status
 - **[README-TROUBLESHOOTING.md](README-TROUBLESHOOTING.md)** — comprehensive troubleshooting guide для всех компонентов
 - **[README-ELK-DEPLOYMENT.md](README-ELK-DEPLOYMENT.md)** — подробности по развертыванию ELK Stack  
 - **[README-OVERVIEW.md](README-OVERVIEW.md)** — краткая памятка по развертыванию
+- **[README-CI-CD-SETUP.md](README-CI-CD-SETUP.md)** — полное руководство по настройке CI/CD для сервисов
 - **[README-HARDWARE.md](README-HARDWARE.md)** — детали железа и апгрейдов
 
 ---
 
 ## 🎯 TL;DR
 
-**Готов к production гибридный K3S с enterprise-grade логированием:**
+**Готов к production гибридный K3S с enterprise-grade возможностями:**
 
 1. **Проверь зависимости**: `./scripts/check_dependencies.sh`
 2. **Базовый кластер**: `python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --gpu true`
 3. **Enterprise фичи**: `python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase all`
-4. **Если проблемы**: [README-TROUBLESHOOTING.md](README-TROUBLESHOOTING.md)
+4. **Настройте CI/CD**: [README-CI-CD-SETUP.md](README-CI-CD-SETUP.md)
+5. **Если проблемы**: [README-TROUBLESHOOTING.md](README-TROUBLESHOOTING.md)
 
-**🔥 Результат**: GitOps, Service Mesh, оптимизированные логи с compression/ILM/snapshots, auto-scaling, monitoring — всё enterprise-grade за 15 минут! 🚀
+**🔥 Результат**: Сетевая платформа для автоматического деплоя сервисов через GitHub Actions → Docker Hub → kubectl. Единый мониторинг, логи, TLS, auto-scaling — всё enterprise-grade за 15 минут! 🚀
