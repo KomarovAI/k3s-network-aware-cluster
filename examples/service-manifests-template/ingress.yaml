@@ -1,0 +1,167 @@
+# Kubernetes Ingress Template
+# Пример ingress.yaml для CI/CD сервиса
+# Поместить в k8s/ingress.yaml в репозитории сервиса
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: ${KUBE_NAMESPACE}
+  labels:
+    app: ${SERVICE_NAME}
+    
+  annotations:
+    # Автоматические TLS сертификаты
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    
+    # HTTPS redirect и security headers
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    
+    # Оптимизация для высоконагруженных сервисов (10 Gbps VPS)
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "8k"
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "8"
+    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "16k"
+    
+    # Rate limiting (опционально)
+    nginx.ingress.kubernetes.io/rate-limit-rpm: "1000"
+    nginx.ingress.kubernetes.io/rate-limit-burst: "100"
+    
+    # Кеширование статических ресурсов
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location ~* \.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, no-transform";
+        add_header X-Content-Type-Options "nosniff";
+      }
+      
+    # CORS для API сервисов
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://${FRONTEND_DOMAIN}"  # Указать домен фронтенда
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization, X-Requested-With"
+    
+spec:
+  ingressClassName: nginx
+  
+  tls:
+  - hosts:
+    - ${SERVICE_NAME}.${DOMAIN_BASE}  # Например: api.cockpit.work.gd
+    secretName: ${SERVICE_NAME}-tls
+    
+  rules:
+  - host: ${SERVICE_NAME}.${DOMAIN_BASE}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ${SERVICE_NAME}
+            port:
+              number: 80
+
+---
+# Опционально: Istio VirtualService для advanced routing
+# Раскомментировать если нужны canary deploys, traffic splitting, fault injection
+# apiVersion: networking.istio.io/v1alpha3
+# kind: VirtualService
+# metadata:
+#   name: ${SERVICE_NAME}
+#   namespace: ${KUBE_NAMESPACE}
+# spec:
+#   hosts:
+#   - ${SERVICE_NAME}.${DOMAIN_BASE}
+#   gateways:
+#   - istio-system/default-gateway
+#   http:
+#   - match:
+#     - uri:
+#         prefix: /
+#     route:
+#     - destination:
+#         host: ${SERVICE_NAME}.${KUBE_NAMESPACE}.svc.cluster.local
+#         port:
+#           number: 80
+#       weight: 100  # 100% трафика на stable версию
+#     # Опционально: canary routing
+#     # - destination:
+#     #     host: ${SERVICE_NAME}-canary.${KUBE_NAMESPACE}.svc.cluster.local
+#     #     port:
+#     #       number: 80
+#     #   weight: 0  # 0% на canary (увеличивать постепенно)
+#     timeout: 30s
+#     retries:
+#       attempts: 3
+#       perTryTimeout: 10s
+
+---
+# Опционально: NetworkPolicy для безопасности
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ${SERVICE_NAME}-netpol
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app: ${SERVICE_NAME}
+      
+  policyTypes:
+  - Ingress
+  - Egress
+  
+  ingress:
+  # Разрешаем трафик от ingress controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+  
+  # Разрешаем трафик от Prometheus
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+  
+  # Разрешаем трафик между сервисами в том же namespace
+  - from:
+    - podSelector:
+        matchLabels:
+          tier: application
+    ports:
+    - protocol: TCP
+      port: 8080
+  
+  egress:
+  # DNS запросы
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+  
+  # Подключение к базам данных (если в кластере)
+  - to:
+    - podSelector:
+        matchLabels:
+          tier: database
+    ports:
+    - protocol: TCP
+      port: 5432  # PostgreSQL
+    - protocol: TCP
+      port: 6379  # Redis
+    - protocol: TCP
+      port: 27017 # MongoDB
+  
+  # Внешние API (опционально)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS
+    - protocol: TCP
+      port: 80   # HTTP
