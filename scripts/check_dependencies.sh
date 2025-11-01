@@ -75,6 +75,45 @@ if kubectl get nodes >/dev/null 2>&1; then
     WORKER_NODES=$(kubectl get nodes -l node-role.kubernetes.io/worker=worker -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
     if [ -n "$WORKER_NODES" ]; then
         echo -e "  ${GREEN}✅ Worker ноды найдены: $WORKER_NODES${NC}"
+        
+        # 🔧 НОВОЕ: Проверка сетевых компонентов на master
+        echo -e "\n  ${BLUE}🌐 Проверка сетевых компонентов на master:${NC}"
+        
+        # Проверка ingress-nginx на master
+        INGRESS_NODE=$(kubectl get pod -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null)
+        MASTER_NODE=$(kubectl get nodes -l node-role.kubernetes.io/control-plane=true -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        
+        if [ -n "$INGRESS_NODE" ] && [ -n "$MASTER_NODE" ]; then
+            if [ "$INGRESS_NODE" = "$MASTER_NODE" ]; then
+                echo -e "    ${GREEN}✅ ingress-nginx размещен на master: $INGRESS_NODE${NC}"
+            else
+                echo -e "    ${YELLOW}⚠️ ingress-nginx на worker: $INGRESS_NODE (рекомендуется на master)${NC}"
+                WARNINGS="$WARNINGS ingress-placement"
+            fi
+        elif kubectl get deployment -n ingress-nginx ingress-nginx-controller >/dev/null 2>&1; then
+            echo -e "    ${YELLOW}⚠️ ingress-nginx найден, но не спланирован${NC}"
+            WARNINGS="$WARNINGS ingress-pending"
+        else
+            echo -e "    ${BLUE}ℹ️ ingress-nginx не установлен (будет установлен автоматически)${NC}"
+        fi
+        
+        # Проверка cert-manager на master
+        CERTMGR_NODE=$(kubectl get pod -n cert-manager -l app=cert-manager -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null)
+        
+        if [ -n "$CERTMGR_NODE" ] && [ -n "$MASTER_NODE" ]; then
+            if [ "$CERTMGR_NODE" = "$MASTER_NODE" ]; then
+                echo -e "    ${GREEN}✅ cert-manager размещен на master: $CERTMGR_NODE${NC}"
+            else
+                echo -e "    ${YELLOW}⚠️ cert-manager на worker: $CERTMGR_NODE (рекомендуется на master)${NC}"
+                WARNINGS="$WARNINGS cert-manager-placement"
+            fi
+        elif kubectl get deployment -n cert-manager cert-manager >/dev/null 2>&1; then
+            echo -e "    ${YELLOW}⚠️ cert-manager найден, но не спланирован${NC}"
+            WARNINGS="$WARNINGS cert-manager-pending"
+        else
+            echo -e "    ${BLUE}ℹ️ cert-manager не установлен (будет установлен автоматически)${NC}"
+        fi
+        
     else
         echo -e "  ${YELLOW}⚠️ Worker ноды не найдены (компоненты будут на master)${NC}"
         WARNINGS="$WARNINGS worker-nodes"
@@ -227,7 +266,39 @@ fi
 
 echo ""
 
-# 9. ИТОГОВАЯ ОЦЕНКА
+# 9. 🔧 НОВОЕ: ПРОВЕРКА РАЗМЕЩЕНИЯ КОМПОНЕНТОВ
+if [ -n "$WORKER_NODES" ]; then
+    echo -e "${BLUE}🎯 Проверка оптимального размещения компонентов:${NC}"
+    
+    # Мониторинг должен быть на worker
+    PROMETHEUS_NODE=$(kubectl get pod -n monitoring -l app=prometheus -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null)
+    if [ -n "$PROMETHEUS_NODE" ]; then
+        if echo "$WORKER_NODES" | grep -q "$PROMETHEUS_NODE"; then
+            echo -e "    ${GREEN}✅ Prometheus на worker: $PROMETHEUS_NODE${NC}"
+        else
+            echo -e "    ${YELLOW}⚠️ Prometheus на master: $PROMETHEUS_NODE (лучше на worker)${NC}"
+            WARNINGS="$WARNINGS prometheus-placement"
+        fi
+    else
+        echo -e "    ${BLUE}ℹ️ Prometheus еще не развернут${NC}"
+    fi
+    
+    GRAFANA_NODE=$(kubectl get pod -n monitoring -l app=grafana -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null)
+    if [ -n "$GRAFANA_NODE" ]; then
+        if echo "$WORKER_NODES" | grep -q "$GRAFANA_NODE"; then
+            echo -e "    ${GREEN}✅ Grafana на worker: $GRAFANA_NODE${NC}"
+        else
+            echo -e "    ${YELLOW}⚠️ Grafana на master: $GRAFANA_NODE (лучше на worker)${NC}"
+            WARNINGS="$WARNINGS grafana-placement"
+        fi
+    else
+        echo -e "    ${BLUE}ℹ️ Grafana еще не развернут${NC}"
+    fi
+fi
+
+echo ""
+
+# 10. ИТОГОВАЯ ОЦЕНКА
 echo -e "${BLUE}🎯 ИТОГОВАЯ ОЦЕНКА ГОТОВНОСТИ:${NC}"
 echo "================================================"
 
@@ -288,6 +359,28 @@ if [ -n "$WARNINGS" ]; then
             "disk-space")
                 echo "  • Диск: освободите место или настройте retention policies"
                 ;;
+            "ingress-placement")
+                echo -e "  • ${YELLOW}ingress-nginx на worker:${NC} лучше переместить на master (10 Gbps VPS)"
+                echo "    🔧 Auto-fix: kubectl patch deployment ingress-nginx-controller -n ingress-nginx --patch '"
+                echo '        {"spec":{"template":{"spec":{"nodeSelector":{"node-role.kubernetes.io/control-plane":"true"},"tolerations":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"}]}}}}'
+                echo "    🔧 И перезапуст: kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx"
+                ;;
+            "cert-manager-placement")
+                echo -e "  • ${YELLOW}cert-manager на worker:${NC} лучше переместить на master (TLS endpoint)"
+                echo "    🔧 Auto-fix:"
+                echo "    for deploy in cert-manager cert-manager-cainjector cert-manager-webhook; do"
+                echo "      kubectl patch deployment \$deploy -n cert-manager --patch '"
+                echo '        {"spec":{"template":{"spec":{"nodeSelector":{"node-role.kubernetes.io/control-plane":"true"},"tolerations":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"}]}}}}'
+                echo "    done"
+                ;;
+            "prometheus-placement")
+                echo -e "  • ${YELLOW}Prometheus на master:${NC} лучше переместить на worker (больше рам)"
+                echo "    🔧 Переразверните: python3 scripts/deploy_all_optimized.py с worker нодой"
+                ;;
+            "grafana-placement")
+                echo -e "  • ${YELLOW}Grafana на master:${NC} лучше переместить на worker (визуальные данные)"
+                echo "    🔧 Переразверните: python3 scripts/deploy_all_optimized.py с worker нодой"
+                ;;
         esac
     done
     echo ""
@@ -303,6 +396,15 @@ if [ -z "$CRITICAL_ISSUES" ] && [ -z "$MISSING_TOOLS" ] && [ -z "$MISSING_PYTHON
     echo "  3. Enterprise Phase 2: python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase 2"
     echo "  4. Enterprise Phase 3: python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase 3"
     
+    # 🔧 НОВОЕ: Показываем спецификацию сети
+    if [ -n "$WORKER_NODES" ]; then
+        echo ""
+        echo -e "${BLUE}📡 СЕТЕВОЕ РАСПРЕДЕЛЕНИЕ:${NC}"
+        echo "  🖥️ Master VPS: 10 Gbps (1.25 ГБ/с) - сетевые компоненты"
+        echo "  🏠 Worker PC: связь с VPS ~10 МБ/с (Tailscale), интернет 100 Мбит/с"
+        echo "  ✅ Оптимальное распределение: сеть на VPS, вычисления на worker"
+    fi
+    
     exit 0
 else
     echo -e "${RED}❌ НАЙДЕНЫ ПРОБЛЕМЫ - ИСПРАВЬТЕ ПЕРЕД РАЗВЕРТЫВАНИЕМ${NC}"
@@ -315,6 +417,29 @@ else
     echo ""
     echo "# После исправления запустите снова:"
     echo "./scripts/check_dependencies.sh"
+    
+    # 🔧 НОВОЕ: Auto-fix команды для размещения компонентов
+    if echo "$WARNINGS" | grep -q "ingress-placement\|cert-manager-placement"; then
+        echo ""
+        echo -e "${YELLOW}🔧 AUTO-FIX ДЛЯ РАЗМЕЩЕНИЯ КОМПОНЕНТОВ:${NC}"
+        
+        if echo "$WARNINGS" | grep -q "ingress-placement"; then
+            echo "# Перемещение ingress-nginx на master (10 Gbps VPS):"
+            echo 'kubectl patch deployment ingress-nginx-controller -n ingress-nginx --patch \''
+            echo '  \047{"spec":{"template":{"spec":{"nodeSelector":{"node-role.kubernetes.io/control-plane":"true"},"tolerations":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"}]}}}}\047'
+            echo "kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx"
+            echo ""
+        fi
+        
+        if echo "$WARNINGS" | grep -q "cert-manager-placement"; then
+            echo "# Перемещение cert-manager на master (TLS endpoint):"
+            echo "for deploy in cert-manager cert-manager-cainjector cert-manager-webhook; do"
+            echo '  kubectl patch deployment $deploy -n cert-manager --patch \''
+            echo '    \047{"spec":{"template":{"spec":{"nodeSelector":{"node-role.kubernetes.io/control-plane":"true"},"tolerations":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"}]}}}}\047'
+            echo "done"
+            echo ""
+        fi
+    fi
     
     exit 1
 fi
