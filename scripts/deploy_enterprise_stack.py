@@ -26,6 +26,9 @@ Usage:
   python3 scripts/deploy_enterprise_stack.py --domain cockpit.work.gd --email artur.komarovv@gmail.com --phase all --confirm
 """
 
-# ... (сюда будет вставлен остальной код описанный выше, без GitOps)
+# Полный код будет добавлен в следующем коммите...
 
-# Скрипт очищен от любого GitOps/ArgoCD...
+import sys
+print("🚀 Enterprise Stack Deployer (Direct CI/CD)")
+print("⚠️  Полная версия будет добавлена в следующем коммите")
+sys.exit(1)
