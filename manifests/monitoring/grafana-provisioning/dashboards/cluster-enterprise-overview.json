@@ -1,0 +1,55 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "links": [
+    {"type":"link","title":"Kibana","url":"https://kibana.cockpit.work.gd","targetBlank":true},
+    {"type":"link","title":"ArgoCD","url":"https://argocd.cockpit.work.gd","targetBlank":true},
+    {"type":"link","title":"Jaeger","url":"https://jaeger.cockpit.work.gd","targetBlank":true},
+    {"type":"link","title":"Kubevious","url":"https://kubevious.cockpit.work.gd","targetBlank":true}
+  ],
+  "panels": [
+    {"type":"row","title":"Cluster Health","collapsed":false},
+    {"type":"stat","title":"Ready Nodes","datasource":"Prometheus","targets":[{"expr":"sum(kube_node_status_condition{condition=\"Ready\",status=\"true\"})"}]},
+    {"type":"stat","title":"API Requests/s","datasource":"Prometheus","targets":[{"expr":"sum(rate(apiserver_request_total[5m]))"}]},
+
+    {"type":"row","title":"Compute & GPU"},
+    {"type":"timeseries","title":"Node CPU %","datasource":"Prometheus","targets":[{"expr":"avg(100 - (avg by (instance)(irate(node_cpu_seconds_total{mode=\"idle\"}[5m]))*100))"}]},
+    {"type":"timeseries","title":"Node Memory %","datasource":"Prometheus","targets":[{"expr":"avg((node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)"}]},
+    {"type":"timeseries","title":"GPU Utilization %","datasource":"Prometheus","targets":[{"expr":"avg(DCGM_FI_DEV_GPU_UTIL)"}]},
+
+    {"type":"row","title":"Ingress & Istio"},
+    {"type":"timeseries","title":"Ingress RPS","datasource":"Prometheus","targets":[{"expr":"sum(rate(nginx_ingress_controller_requests{status!~\"5..\"}[5m]))"}]},
+    {"type":"timeseries","title":"Ingress 5xx","datasource":"Prometheus","targets":[{"expr":"sum(rate(nginx_ingress_controller_requests{status=~\"5..\"}[5m]))"}]},
+    {"type":"timeseries","title":"Istio p95 latency","datasource":"Prometheus","targets":[{"expr":"histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket[5m])) by (le))"}]},
+    {"type":"timeseries","title":"Istio error rate","datasource":"Prometheus","targets":[{"expr":"sum(rate(istio_requests_total{response_code=~\"5..\"}[5m])) / sum(rate(istio_requests_total[5m]))"}]},
+
+    {"type":"row","title":"Autoscaling"},
+    {"type":"stat","title":"HPA count","datasource":"Prometheus","targets":[{"expr":"count(kube_horizontalpodautoscaler_info)"}]},
+    {"type":"stat","title":"KEDA ScaledObjects","datasource":"Prometheus","targets":[{"expr":"sum(keda_scaledobject_total)"}]},
+
+    {"type":"row","title":"Logging (ELK)"},
+    {"type":"stat","title":"ES Health","datasource":"Prometheus","targets":[{"expr":"max(elasticsearch_cluster_health_status)"}],"options":{"reduceOptions":{"calcs":["lastNotNull"]}}},
+    {"type":"timeseries","title":"Indexing rate","datasource":"Prometheus","targets":[{"expr":"sum(rate(elasticsearch_indices_indexing_index_total[5m]))"}]},
+    {"type":"timeseries","title":"Store size (GB)","datasource":"Prometheus","targets":[{"expr":"sum(elasticsearch_indices_store_size_bytes)/1e9"}]},
+
+    {"type":"row","title":"SLO & Alerts"},
+    {"type":"stat","title":"Active alerts","datasource":"Prometheus","targets":[{"expr":"count(ALERTS{alertstate=\"firing\"})"}]}
+  ],
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": ["kubernetes","enterprise","overview"],
+  "templating": {
+    "list": [
+      {"type":"datasource","name":"Prom","query":"prometheus","label":"Prometheus"},
+      {"type":"query","name":"namespace","label":"Namespace","datasource":"Prometheus","query":"label_values(kube_pod_info, namespace)","includeAll":true}
+    ]
+  },
+  "time": {"from":"now-6h","to":"now"},
+  "timezone": "browser",
+  "title": "Cluster Enterprise Overview",
+  "version": 1
+}

@@ -1,0 +1,233 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config-optimized
+  namespace: logging
+data:
+  filebeat.yml: |
+    filebeat.autodiscover:
+      providers:
+        - type: kubernetes
+          node: ${NODE_NAME}
+          hints.enabled: true
+          hints.default_config:
+            type: container
+            paths:
+              - /var/log/containers/*${data.kubernetes.container.id}.log
+            # === MULTILINE OPTIMIZATION ===
+            multiline.pattern: '^[[:space:]]+|^Caused by:|^\tat |^\.\.\. [0-9]+ more'
+            multiline.negate: false
+            multiline.match: after
+            multiline.max_lines: 500
+            multiline.timeout: 5s
+            # === PROCESSORS для шумоподавления ===
+            processors:
+              # 1. Добавляем K8S metadata
+              - add_kubernetes_metadata:
+                  host: ${NODE_NAME}
+                  matchers:
+                    - logs_path:
+                        logs_path: "/var/log/containers/"
+                        resource_type: "container"
+              
+              # 2. ШУМОДАВ: Drop health checks
+              - drop_event:
+                  when:
+                    regexp:
+                      kubernetes.container.name: '.*health.*|.*liveness.*|.*readiness.*'
+              
+              # 3. ШУМОДАВ: Drop системные namespace info/debug
+              - drop_event:
+                  when:
+                    and:
+                      - contains:
+                          kubernetes.namespace: 'kube-system'
+                      - not:
+                          regexp:
+                            log.level: '(?i)(warn|error|fatal|critical)'
+              
+              # 4. ШУМОДАВ: Drop nginx успешные requests
+              - drop_event:
+                  when:
+                    and:
+                      - regexp:
+                          kubernetes.labels.app: 'nginx|ingress'
+                      - regexp:
+                          message: 'HTTP/[12]\.[0-9]" [23][0-9][0-9]'
+              
+              # 5. ШУМОДАВ: Drop prometheus debug
+              - drop_event:
+                  when:
+                    and:
+                      - contains:
+                          kubernetes.labels.app: 'prometheus'
+                      - regexp:
+                          message: 'level=debug|GET /metrics'
+              
+              # 6. TRUNCATE длинные сообщения
+              - script:
+                  lang: javascript
+                  id: truncate_message
+                  source: >
+                    function process(event) {
+                      var msg = event.Get("message");
+                      if (msg && msg.length > 16384) {
+                        event.Put("message", msg.substring(0, 16384) + "... [TRUNCATED]");
+                        event.Put("truncated", true);
+                      }
+                    }
+              
+              # 7. Нормализация log levels
+              - script:
+                  lang: javascript
+                  id: normalize_log_level
+                  source: >
+                    function process(event) {
+                      var msg = event.Get("message");
+                      if (msg) {
+                        var level = "info"; // default
+                        if (/\b(error|err|ERROR)\b/.test(msg)) level = "error";
+                        else if (/\b(warn|warning|WARN)\b/.test(msg)) level = "warn";
+                        else if (/\b(debug|DEBUG)\b/.test(msg)) level = "debug";
+                        else if (/\b(trace|TRACE)\b/.test(msg)) level = "trace";
+                        
+                        event.Put("log.level", level);
+                      }
+                    }
+              
+              # 8. Rename fields для соответствия ECS
+              - rename:
+                  fields:
+                    - from: "log.level"
+                      to: "level"
+                  ignore_missing: true
+              
+              # 9. Add useful fields
+              - add_fields:
+                  target: ''
+                  fields:
+                    ecs.version: '8.6.0'
+                    agent.name: 'filebeat-k3s'
+                    cluster.name: 'k3s-hybrid'
+    
+    # === OUTPUT OPTIMIZATION ===
+    output.logstash:
+      hosts: ["logstash:5044"]
+      # Bulk оптимизация
+      bulk_max_size: 3000
+      worker: 2
+      compression_level: 1  # Быстрое сжатие для network
+      # Retry настройки
+      max_retries: 3
+      backoff.init: 1s
+      backoff.max: 60s
+    
+    # === LOGGING OPTIMIZATION ===
+    logging.level: info
+    logging.to_files: true
+    logging.files:
+      path: /var/log/filebeat
+      name: filebeat
+      keepfiles: 3
+      permissions: 0600
+      rotateeverybytes: 50MB
+    
+    # === MONITORING ===
+    monitoring:
+      enabled: true
+      elasticsearch:
+        hosts: ["elasticsearch:9200"]
+        index: ".monitoring-filebeat"
+    
+    # === PERFORMANCE TUNING ===
+    max_procs: 4  # CPU cores limit
+    
+    # Registry для метрик
+    filebeat.registry:
+      path: /usr/share/filebeat/data/registry/filebeat
+      file_permissions: 0600
+      flush: 5s
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: filebeat-optimized
+  namespace: logging
+  labels:
+    app: filebeat-optimized
+spec:
+  selector:
+    matchLabels:
+      app: filebeat-optimized
+  template:
+    metadata:
+      labels:
+        app: filebeat-optimized
+    spec:
+      serviceAccountName: filebeat
+      terminationGracePeriodSeconds: 30
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: filebeat
+        image: docker.elastic.co/beats/filebeat:8.10.4
+        args: [
+          "-c", "/etc/filebeat.yml",
+          "-e"
+        ]
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 500m  # Больше CPU для processing
+            memory: 400Mi
+        securityContext:
+          runAsUser: 0
+          privileged: false
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - DAC_READ_SEARCH
+        volumeMounts:
+        - name: config
+          mountPath: /etc/filebeat.yml
+          readOnly: true
+          subPath: filebeat.yml
+        - name: data
+          mountPath: /usr/share/filebeat/data
+        - name: varlibdockercontainers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        - name: varlog
+          mountPath: /var/log
+          readOnly: true
+        - name: varrundocker
+          mountPath: /var/run/docker.sock
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          defaultMode: 0600
+          name: filebeat-config-optimized
+      - name: varlibdockercontainers
+        hostPath:
+          path: /var/lib/docker/containers
+      - name: varlog
+        hostPath:
+          path: /var/log
+      - name: varrundocker
+        hostPath:
+          path: /var/run/docker.sock
+      - name: data
+        hostPath:
+          path: /var/lib/filebeat-data
+          type: DirectoryOrCreate

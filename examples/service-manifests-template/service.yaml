@@ -1,0 +1,41 @@
+# Kubernetes Service Template
+# Пример service.yaml для CI/CD сервиса
+# Поместить в k8s/service.yaml в репозитории сервиса
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: ${KUBE_NAMESPACE}
+  labels:
+    app: ${SERVICE_NAME}
+    tier: application
+  annotations:
+    # Istio traffic policy
+    networking.istio.io/exportTo: "."
+    # Prometheus monitoring
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+    
+spec:
+  selector:
+    app: ${SERVICE_NAME}
+    
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+    
+  type: ClusterIP  # Внутренний сервис, доступ через Ingress
+  
+  # Оптимизация для высокого трафика
+  sessionAffinity: None
+  ipFamilyPolicy: SingleStack
+  ipFamilies:
+  - IPv4

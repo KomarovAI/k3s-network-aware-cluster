@@ -1,0 +1,126 @@
+# LimitRange for all namespaces
+# Ensures pods have resource requests/limits by default
+
+---
+# Apps namespace limits (for user applications)
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: apps-limits
+  namespace: apps
+spec:
+  limits:
+  # Container limits
+  - type: Container
+    default:  # Default limits (if not specified)
+      cpu: "2000m"        # Home PCs can handle 2 cores per container
+      memory: "4Gi"        # 4GB default limit
+      ephemeral-storage: "5Gi"
+    defaultRequest:  # Default requests
+      cpu: "100m"         # Conservative default
+      memory: "256Mi"     # Conservative default  
+      ephemeral-storage: "1Gi"
+    max:  # Maximum allowed
+      cpu: "16000m"       # Max 16 cores (Home PC has 26)
+      memory: "48Gi"       # Max 48GB (Home PC has 64GB)
+      ephemeral-storage: "500Gi"  # Max 500GB (1TB storage)
+    min:  # Minimum required
+      cpu: "10m"          # At least 10m CPU
+      memory: "32Mi"      # At least 32MB RAM
+      ephemeral-storage: "100Mi"
+  
+  # Pod limits (sum of all containers)
+  - type: Pod
+    max:
+      cpu: "20000m"       # Max pod can use 20 cores
+      memory: "56Gi"       # Max pod can use 56GB
+    min:
+      cpu: "10m"
+      memory: "32Mi"
+  
+  # PVC limits
+  - type: PersistentVolumeClaim
+    max:
+      storage: "800Gi"    # Max 800GB per PVC (Home PC: 1TB)
+    min:
+      storage: "1Gi"      # Min 1GB
+---
+# System namespace limits (for management tools)
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: system-limits
+  namespace: system
+spec:
+  limits:
+  # System containers (more conservative)
+  - type: Container
+    default:
+      cpu: "500m"         # System tools are lighter
+      memory: "1Gi"        
+      ephemeral-storage: "2Gi"
+    defaultRequest:
+      cpu: "50m"
+      memory: "128Mi"
+      ephemeral-storage: "500Mi"
+    max:
+      cpu: "2000m"        # Max 2 cores for system tools
+      memory: "8Gi"        # Max 8GB for system
+      ephemeral-storage: "20Gi"
+    min:
+      cpu: "10m"
+      memory: "32Mi"
+      ephemeral-storage: "100Mi"
+---
+# Monitoring namespace limits (VPS-friendly)
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: monitoring-limits
+  namespace: monitoring
+spec:
+  limits:
+  # Monitoring tools (optimized for enhanced VPS)
+  - type: Container
+    default:
+      cpu: "1000m"        # Monitoring can use more on enhanced VPS
+      memory: "2Gi"        # 2GB default for Prometheus/Grafana
+      ephemeral-storage: "10Gi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "200Mi"
+      ephemeral-storage: "1Gi"
+    max:
+      cpu: "2000m"        # Max 2 cores on enhanced VPS
+      memory: "3Gi"        # Max 3GB (leave 1GB for system)
+      ephemeral-storage: "50Gi"  # Max 50GB for metrics storage
+    min:
+      cpu: "25m"
+      memory: "64Mi"
+      ephemeral-storage: "500Mi"
+---
+# Security namespace limits (lightweight tools)
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: security-limits
+  namespace: security
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "200m"         # Security tools are lightweight
+      memory: "512Mi"
+      ephemeral-storage: "1Gi"
+    defaultRequest:
+      cpu: "50m"
+      memory: "128Mi"
+      ephemeral-storage: "500Mi"
+    max:
+      cpu: "1000m"        # Max 1 core for security tools
+      memory: "2Gi"
+      ephemeral-storage: "10Gi"
+    min:
+      cpu: "10m"
+      memory: "32Mi"
+      ephemeral-storage: "100Mi"

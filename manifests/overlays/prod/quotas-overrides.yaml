@@ -1,0 +1,16 @@
+# Quotas overrides for production (if needed to tighten)
+# This file can adjust ResourceQuotas defined in base for prod
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: monitoring-quota
+  namespace: monitoring
+spec:
+  hard:
+    requests.cpu: "2000m"
+    requests.memory: "3Gi"
+    limits.cpu: "2500m"
+    limits.memory: "3.5Gi"
+    requests.storage: "80Gi"

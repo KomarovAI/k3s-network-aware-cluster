@@ -1,0 +1,760 @@
+# Service Deployment Examples
+# Production-ready templates for enhanced VPS + Home PC architecture
+# VPS: 3 vCPU, 4GB RAM, 100GB | Home PCs: RTX GPUs, 16-32GB RAM
+
+# Example 1: AI/ML Service (Home PC placement)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-ai-service
+  namespace: apps
+  labels:
+    app: ollama
+    tier: ai-workload
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+        monitoring: "true"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      # Force Home PC placement (GPU required)
+      nodeSelector:
+        node-type: home-pc
+        gpu-enabled: "true"
+        high-performance: "true"
+      
+      # Spread across multiple Home PCs
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: ollama
+              topologyKey: kubernetes.io/hostname
+      
+      # Production security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: ollama
+        image: ollama/ollama:latest
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: false  # Ollama needs write access
+        
+        ports:
+        - containerPort: 11434
+          name: ollama-api
+        - containerPort: 8080
+          name: metrics
+        
+        # Generous resources for Home PC
+        resources:
+          requests:
+            memory: "8Gi"         # RTX PCs have plenty
+            cpu: "2000m"          # 2 CPU cores baseline
+            nvidia.com/gpu: 1     # Require GPU
+          limits:
+            memory: "24Gi"        # Can use most of 32GB
+            cpu: "12000m"         # Can use 12 cores
+            nvidia.com/gpu: 1
+        
+        env:
+        - name: OLLAMA_HOST
+          value: "0.0.0.0:11434"
+        - name: OLLAMA_MODELS
+          value: "/app/models"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        
+        volumeMounts:
+        - name: models-storage
+          mountPath: /app/models
+        - name: tmp
+          mountPath: /tmp
+        
+        livenessProbe:
+          httpGet:
+            path: /api/tags
+            port: 11434
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /api/tags
+            port: 11434
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      
+      volumes:
+      - name: models-storage
+        emptyDir:
+          sizeLimit: 50Gi        # Large models storage
+      - name: tmp
+        emptyDir:
+          sizeLimit: 5Gi
+      
+      terminationGracePeriodSeconds: 60
+---
+# HPA for AI Service
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ollama-hpa
+  namespace: apps
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ollama-ai-service
+  minReplicas: 2
+  maxReplicas: 8               # Home PCs can run multiple AI instances
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80   # AI workloads can use more CPU
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 85   # Memory-intensive AI models
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60    # Faster scaling for AI
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 300   # Slower scale-down
+---
+# PDB for AI Service
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ollama-pdb
+  namespace: apps
+spec:
+  minAvailable: 1            # Always keep 1 AI instance running
+  selector:
+    matchLabels:
+      app: ollama
+
+# Example 2: Web API Service (VPS placement for public access)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-api-service
+  namespace: apps
+  labels:
+    app: web-api
+    tier: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web-api
+  template:
+    metadata:
+      labels:
+        app: web-api
+        monitoring: "true"
+    spec:
+      # Can run on enhanced VPS for internet access
+      nodeSelector:
+        internet-access: "true"
+        can-run-monitoring: "true"
+      
+      tolerations:
+      - key: vps-enhanced
+        effect: PreferNoSchedule   # Enhanced VPS can handle web API
+      
+      # Production security
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: api
+        image: nginx:alpine
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true
+        
+        ports:
+        - containerPort: 80
+          name: http
+        
+        # Conservative resources for VPS
+        resources:
+          requests:
+            memory: "100Mi"       # Light for VPS
+            cpu: "50m"
+          limits:
+            memory: "500Mi"       # Reasonable burst
+            cpu: "300m"
+        
+        volumeMounts:
+        - name: nginx-cache
+          mountPath: /var/cache/nginx
+        - name: tmp
+          mountPath: /tmp
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      
+      volumes:
+      - name: nginx-cache
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: tmp
+        emptyDir:
+          sizeLimit: 100Mi
+
+# Example 3: Database Service (Home PC placement for performance)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgresql-service
+  namespace: apps
+  labels:
+    app: postgresql
+    tier: database
+spec:
+  replicas: 1                # Single replica for consistency
+  strategy:
+    type: Recreate           # Database strategy
+  selector:
+    matchLabels:
+      app: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      # Home PC for fast NVMe storage
+      nodeSelector:
+        node-type: home-pc
+        high-performance: "true"
+      
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: false  # DB needs write access
+        
+        ports:
+        - containerPort: 5432
+          name: postgres
+        
+        # High performance resources for Home PC
+        resources:
+          requests:
+            memory: "2Gi"         # Baseline for DB
+            cpu: "1000m"
+          limits:
+            memory: "8Gi"         # Can use lots of RAM
+            cpu: "4000m"          # 4 cores for DB operations
+        
+        env:
+        - name: POSTGRES_DB
+          value: "appdb"
+        - name: POSTGRES_USER
+          value: "appuser"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretRef:
+              name: postgres-secret
+              key: password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 -p 5432
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 6
+        
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 -p 5432
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+---
+# PVC for Database (Home PC local storage)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: apps
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi          # Fast NVMe storage on Home PC
+  storageClassName: local-path  # K3S built-in
+---
+# Database Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: apps
+type: Opaque
+data:
+  password: cGFzc3dvcmQxMjM=  # base64 encoded 'password123'
+
+# Example 4: Ingress Configuration
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  namespace: apps
+  annotations:
+    # Enhanced VPS ingress optimizations
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/compression: "gzip"
+    nginx.ingress.kubernetes.io/compression-level: "6"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET,POST,PUT,DELETE,OPTIONS"
+    
+    # Rate limiting for VPS protection
+    nginx.ingress.kubernetes.io/rate-limit-connections: "100"
+    nginx.ingress.kubernetes.io/rate-limit-rps: "50"
+    
+    # Caching for better VPS performance
+    nginx.ingress.kubernetes.io/server-alias: "api.example.com"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: api.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-api-service
+            port:
+              number: 80
+      - path: /ai
+        pathType: Prefix
+        backend:
+          service:
+            name: ollama-ai-service
+            port:
+              number: 11434
+  tls:
+  - hosts:
+    - api.example.com
+    secretName: api-tls-secret
+
+# Example 5: Monitoring Service (VPS placement)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: custom-monitoring
+  namespace: apps
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: custom-monitoring
+  template:
+    metadata:
+      labels:
+        app: custom-monitoring
+    spec:
+      # VPS placement for external access
+      nodeSelector:
+        node-type: vps
+        can-run-monitoring: "true"
+      
+      tolerations:
+      - key: vps-enhanced
+        effect: PreferNoSchedule  # Enhanced VPS can handle it
+      
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: monitor
+        image: prom/node-exporter:latest
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        
+        # Light resources for VPS
+        resources:
+          requests:
+            memory: "50Mi"
+            cpu: "25m"
+          limits:
+            memory: "200Mi"
+            cpu: "200m"
+        
+        ports:
+        - containerPort: 9100
+          name: metrics
+
+# Example 6: High-Performance Computing Job
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: compute-job
+  namespace: apps
+spec:
+  template:
+    metadata:
+      labels:
+        workload-type: compute-intensive
+    spec:
+      # Home PC only - need maximum performance
+      nodeSelector:
+        node-type: home-pc
+        high-performance: "true"
+        cpu-cores: ">8"  # Need powerful PC
+      
+      restartPolicy: Never
+      
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: compute
+        image: python:3.11-slim
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        
+        # Maximum resources for compute job
+        resources:
+          requests:
+            memory: "16Gi"        # Use lots of RAM
+            cpu: "8000m"          # 8 CPU cores
+          limits:
+            memory: "28Gi"        # Nearly all RAM
+            cpu: "15000m"         # Nearly all CPU
+        
+        command:
+        - python
+        - -c
+        - |
+          # Your compute-intensive Python code here
+          import time
+          import multiprocessing
+          print(f"Running on {multiprocessing.cpu_count()} cores")
+          time.sleep(300)  # Simulate work
+          print("Computation completed")
+        
+        volumeMounts:
+        - name: compute-workspace
+          mountPath: /workspace
+      
+      volumes:
+      - name: compute-workspace
+        emptyDir:
+          sizeLimit: 10Gi
+  
+  backoffLimit: 2            # Retry failed jobs
+  activeDeadlineSeconds: 3600 # 1 hour timeout
+
+# Example 7: Production Service with Complete HA Setup
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: production-app
+  namespace: apps
+  labels:
+    app: production-app
+    version: v1
+spec:
+  replicas: 4                # HA across multiple Home PCs
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%      # Always keep 75% available
+      maxSurge: 25%            # Add 25% during updates
+  
+  selector:
+    matchLabels:
+      app: production-app
+  
+  template:
+    metadata:
+      labels:
+        app: production-app
+        version: v1
+        monitoring: "true"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Home PC placement
+      nodeSelector:
+        node-type: home-pc
+        compute-tier: workload
+      
+      # Spread across nodes and zones
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: production-app
+            topologyKey: kubernetes.io/hostname
+        
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: high-performance
+                operator: In
+                values: ["true"]
+      
+      # Production security
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: app
+        image: production-app:v1.2.0
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true
+        
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 8081
+          name: metrics
+        
+        # Balanced resources for production
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "6Gi"
+            cpu: "3000m"
+        
+        env:
+        - name: APP_ENV
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        
+        volumeMounts:
+        - name: app-config
+          mountPath: /etc/app
+        - name: tmp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /app/cache
+        
+        # Complete health checks
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 18   # 3 minutes to start
+      
+      volumes:
+      - name: app-config
+        configMap:
+          name: production-app-config
+      - name: tmp
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: cache
+        emptyDir:
+          sizeLimit: 5Gi
+      
+      terminationGracePeriodSeconds: 30
+---
+# HPA for Production App
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: production-app-hpa
+  namespace: apps
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: production-app
+  minReplicas: 4
+  maxReplicas: 20            # Home PCs can handle many instances
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 75
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+---
+# PDB for Production App
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: production-app-pdb
+  namespace: apps
+spec:
+  maxUnavailable: 25%        # Always keep 75% available
+  selector:
+    matchLabels:
+      app: production-app

@@ -1,0 +1,211 @@
+# Enhanced Grafana for Production (VPS optimized)
+# Pinned version with GitHub secrets integration
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+    version: "10.2.2"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+        monitoring: "true"
+    spec:
+      serviceAccountName: monitoring-service-account
+      
+      # VPS placement
+      nodeSelector:
+        node-type: vps
+        can-run-monitoring: "true"
+      
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        effect: NoSchedule
+      - key: vps-enhanced
+        effect: PreferNoSchedule
+      
+      # Pod Security Standards compliant
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: grafana
+        image: grafana/grafana:10.2.2  # Pinned stable version
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: false  # Grafana needs write access
+        
+        ports:
+        - name: web
+          containerPort: 3000
+          protocol: TCP
+        
+        # VPS-optimized resources
+        resources:
+          requests:
+            memory: "400Mi"      # Higher baseline for enhanced VPS
+            cpu: "200m"
+          limits:
+            memory: "1Gi"        # Can use 1GB with 4GB VPS
+            cpu: "800m"          # Can use 0.8 CPU
+        
+        env:
+        # Basic configuration
+        - name: GF_SERVER_HTTP_PORT
+          value: "3000"
+        - name: GF_SERVER_ROOT_URL
+          value: "http://grafana.local:3000"
+        
+        # Security settings
+        - name: GF_SECURITY_ADMIN_USER
+          value: "admin"
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          valueFrom:
+            secretRef:
+              name: monitoring-credentials  # From External Secrets
+              key: grafana-admin-password
+        - name: GF_SECURITY_SECRET_KEY
+          valueFrom:
+            secretRef:
+              name: monitoring-credentials
+              key: grafana-secret-key
+        
+        # Performance settings for enhanced VPS
+        - name: GF_DATABASE_MAX_IDLE_CONN
+          value: "10"           # Higher with better VPS
+        - name: GF_DATABASE_MAX_OPEN_CONN
+          value: "20"
+        - name: GF_DATABASE_CONN_MAX_LIFETIME
+          value: "3600"         # 1 hour
+        
+        # Memory optimization
+        - name: GF_EXPLORE_ENABLED
+          value: "true"
+        - name: GF_METRICS_ENABLED
+          value: "true"
+        - name: GF_SERVER_ENABLE_GZIP
+          value: "true"          # Compress responses
+        
+        # Plugin configuration
+        - name: GF_INSTALL_PLUGINS
+          value: "grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel"
+        
+        # Logging
+        - name: GF_LOG_LEVEL
+          value: "info"
+        - name: GF_LOG_MODE
+          value: "console"
+        
+        volumeMounts:
+        - name: grafana-storage
+          mountPath: /var/lib/grafana
+        - name: grafana-config
+          mountPath: /etc/grafana/provisioning
+        - name: tmp
+          mountPath: /tmp
+        
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      
+      volumes:
+      - name: grafana-storage
+        emptyDir:
+          sizeLimit: 5Gi        # Dashboard and config storage
+      - name: grafana-config
+        configMap:
+          name: grafana-provisioning
+      - name: tmp
+        emptyDir:
+          sizeLimit: 500Mi
+      
+      terminationGracePeriodSeconds: 30
+---
+# Grafana Provisioning Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-provisioning
+  namespace: monitoring
+data:
+  # Datasource configuration
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      access: proxy
+      url: http://prometheus:9090
+      isDefault: true
+      editable: true
+      jsonData:
+        timeInterval: "30s"
+        queryTimeout: "300s"     # Handle slow queries over 10 МБ/с links
+        httpMethod: POST          # Better for complex queries
+  
+  # Dashboard configuration
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+    - name: 'default'
+      orgId: 1
+      folder: ''
+      type: file
+      disableDeletion: false
+      updateIntervalSeconds: 300
+      allowUiUpdates: true
+      options:
+        path: /var/lib/grafana/dashboards
+---
+# Grafana Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3000"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3000
+    targetPort: 3000
+    protocol: TCP
+    name: web
+  selector:
+    app: grafana

@@ -1,0 +1,268 @@
+# HPA and PDB Templates for Production Apps
+# Best practices for scalability and availability
+
+---
+# HorizontalPodAutoscaler Template (autoscaling/v2)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: app-hpa-template
+  namespace: apps
+  labels:
+    template: "true"
+    purpose: scaling
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: REPLACE_WITH_APP_NAME  # Replace in actual usage
+  minReplicas: 2               # Minimum for HA
+  maxReplicas: 10              # Reasonable max for home PCs
+  
+  # Multi-metric scaling (CPU + Memory)
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70   # Industry standard
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80   # Memory threshold
+  
+  # Scaling behavior (prevent thrashing)
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100              # Double pods quickly
+        periodSeconds: 15
+      - type: Pods
+        value: 4                # Or add 4 pods
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5min before scale down
+      policies:
+      - type: Percent
+        value: 10               # Remove 10% at a time
+        periodSeconds: 60
+      selectPolicy: Min
+---
+# PodDisruptionBudget Template  
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: app-pdb-template
+  namespace: apps
+  labels:
+    template: "true"
+    purpose: availability
+spec:
+  # Allow 25% unavailable during disruptions
+  maxUnavailable: 25%
+  selector:
+    matchLabels:
+      app: REPLACE_WITH_APP_NAME  # Replace in actual usage
+---
+# High Availability App Deployment Template
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-ha-template
+  namespace: apps
+  labels:
+    template: "true"
+    tier: production
+spec:
+  replicas: 3                   # Start with 3 for HA
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1         # Keep 2 pods during updates
+      maxSurge: 1               # Add 1 extra during updates
+  
+  selector:
+    matchLabels:
+      app: REPLACE_WITH_APP_NAME
+  
+  template:
+    metadata:
+      labels:
+        app: REPLACE_WITH_APP_NAME
+        monitoring: "true"       # Enable monitoring scraping
+      annotations:
+        # Prometheus monitoring
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    
+    spec:
+      # Force deployment on Home PCs (avoid VPS)
+      nodeSelector:
+        node-type: home-pc
+        compute-tier: workload
+      
+      # Spread across nodes for HA (soft anti-affinity)
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: REPLACE_WITH_APP_NAME
+              topologyKey: kubernetes.io/hostname
+        
+        # Prefer nodes with high performance
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 80
+            preference:
+              matchExpressions:
+              - key: high-performance
+                operator: In
+                values: ["true"]
+          - weight: 60
+            preference:
+              matchExpressions:
+              - key: gpu-enabled
+                operator: In
+                values: ["true"]
+      
+      # Pod Security Standards compliant
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: app
+        image: REPLACE_WITH_IMAGE
+        
+        # Security context (PSS compliant)
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true
+        
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        - containerPort: 8081
+          name: metrics
+          protocol: TCP
+        
+        # Resource allocation for Home PCs
+        resources:
+          requests:
+            memory: "1Gi"        # Home PCs have plenty
+            cpu: "500m"          # 0.5 CPU per pod
+            ephemeral-storage: "1Gi"
+          limits:
+            memory: "4Gi"        # Can burst to 4GB
+            cpu: "2000m"         # Can use 2 full cores
+            ephemeral-storage: "5Gi"
+        
+        # Health checks (production requirement)
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        # Startup probe for slow-starting apps
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 12  # 2 minutes to start
+        
+        env:
+        - name: APP_ENV
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /app/cache
+      
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: cache
+        emptyDir:
+          sizeLimit: 2Gi
+      
+      # DNS configuration optimization
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "2"            # Reduce DNS lookups
+        - name: edns0
+      
+      # Termination grace period
+      terminationGracePeriodSeconds: 30
+---
+# Service Template
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-service-template
+  namespace: apps
+  labels:
+    template: "true"
+  annotations:
+    # Service mesh ready
+    service.kubernetes.io/load-balancer-class: "nginx"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  - port: 8081
+    targetPort: 8081
+    protocol: TCP
+    name: metrics
+  selector:
+    app: REPLACE_WITH_APP_NAME

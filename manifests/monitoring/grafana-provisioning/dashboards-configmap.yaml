@@ -1,0 +1,121 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  k8s-core-overview.json: |
+    {
+      "uid": "k8s-core-overview",
+      "title": "K8S Core Overview",
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "tags": ["k8s","core","cluster"],
+      "panels": [
+        {"type":"row","title":"Cluster Control Plane","collapsed":false},
+        {
+          "type":"stat","title":"API Requests/s","gridPos":{"x":0,"y":1,"w":6,"h":4},
+          "targets":[{"expr":"sum(rate(apiserver_request_total[5m]))"}]
+        },
+        {
+          "type":"stat","title":"API Errors/s","gridPos":{"x":6,"y":1,"w":6,"h":4},
+          "targets":[{"expr":"sum(rate(apiserver_request_total{code=~\"5..\"}[5m]))"}]
+        },
+        {
+          "type":"stat","title":"etcd DB Size (MB)","gridPos":{"x":12,"y":1,"w":6,"h":4},
+          "targets":[{"expr":"avg(etcd_mvcc_db_total_size_in_bytes)/1024/1024"}]
+        },
+        {"type":"row","title":"Nodes"},
+        {
+          "type":"gauge","title":"Node CPU % (avg)","gridPos":{"x":0,"y":6,"w":8,"h":6},
+          "targets":[{"expr":"avg(100 * (1 - rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))"}]
+        },
+        {
+          "type":"gauge","title":"Node Memory % (avg)","gridPos":{"x":8,"y":6,"w":8,"h":6},
+          "targets":[{"expr":"avg(100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)))"}]
+        },
+        {
+          "type":"timeseries","title":"Node FS Usage %","gridPos":{"x":0,"y":12,"w":12,"h":8},
+          "targets":[{"expr":"100 * (1 - (node_filesystem_free_bytes{fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay\"}))"}]
+        },
+        {"type":"row","title":"Workloads"},
+        {
+          "type":"table","title":"Top Pods by CPU","gridPos":{"x":0,"y":20,"w":12,"h":8},
+          "targets":[{"expr":"topk(10, sum by(pod,namespace)(rate(container_cpu_usage_seconds_total{image!=\"\"}[5m])))"}]
+        },
+        {
+          "type":"table","title":"Top Pods by Memory","gridPos":{"x":12,"y":20,"w":12,"h":8},
+          "targets":[{"expr":"topk(10, sum by(pod,namespace)(container_memory_working_set_bytes{image!=\"\"}))"}]
+        },
+        {"type":"row","title":"Network & Ingress"},
+        {
+          "type":"timeseries","title":"Ingress RPS","gridPos":{"x":0,"y":28,"w":12,"h":8},
+          "targets":[{"expr":"sum(rate(nginx_ingress_controller_requests{status!~\"5..\"}[5m]))"}]
+        },
+        {
+          "type":"timeseries","title":"Ingress 5xx/s","gridPos":{"x":12,"y":28,"w":12,"h":8},
+          "targets":[{"expr":"sum(rate(nginx_ingress_controller_requests{status=~\"5..\"}[5m]))"}]
+        }
+      ]
+    },
+  hybrid-cluster-overview.json: |
+    {
+      "uid": "hybrid-cluster-overview",
+      "title": "Hybrid Cluster Overview (VPS + Home PC)",
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "tags": ["k8s","hybrid","vps","home-pc"],
+      "templating": {"list": []},
+      "panels": [
+        {"type":"row","title":"Summary"},
+        {
+          "type":"gauge","title":"VPS CPU %","gridPos":{"x":0,"y":1,"w":6,"h":6},
+          "targets":[{"expr":"avg(100 * (1 - rate(node_cpu_seconds_total{mode=\"idle\", node=~\".*\"} * on(instance) group_left(nodename) kube_node_labels{label_node_type=\"vps\"})[5m]))"}]
+        },
+        {
+          "type":"gauge","title":"HOME-PC CPU %","gridPos":{"x":6,"y":1,"w":6,"h":6},
+          "targets":[{"expr":"avg(100 * (1 - rate(node_cpu_seconds_total{mode=\"idle\"} * on(instance) group_left(nodename) kube_node_labels{label_node_type=\"home-pc\"})[5m]))"}]
+        },
+        {
+          "type":"gauge","title":"VPS Memory %","gridPos":{"x":12,"y":1,"w":6,"h":6},
+          "targets":[{"expr":"avg(100 * (1 - (node_memory_MemAvailable_bytes * on(instance) group_left(nodename) kube_node_labels{label_node_type=\"vps\"} / node_memory_MemTotal_bytes)))"}]
+        },
+        {
+          "type":"gauge","title":"HOME-PC Memory %","gridPos":{"x":18,"y":1,"w":6,"h":6},
+          "targets":[{"expr":"avg(100 * (1 - (node_memory_MemAvailable_bytes * on(instance) group_left(nodename) kube_node_labels{label_node_type=\"home-pc\"} / node_memory_MemTotal_bytes)))"}]
+        },
+        {"type":"row","title":"Network"},
+        {
+          "type":"timeseries","title":"Ingress RPS","gridPos":{"x":0,"y":7,"w":12,"h":8},
+          "targets":[{"expr":"sum(rate(nginx_ingress_controller_requests[5m]))"}]
+        },
+        {
+          "type":"timeseries","title":"Ingress Latency p95","gridPos":{"x":12,"y":7,"w":12,"h":8},
+          "targets":[{"expr":"histogram_quantile(0.95, sum by(le)(rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])))"}]
+        },
+        {"type":"row","title":"Workloads on HOME-PC"},
+        {
+          "type":"table","title":"Top Deployments by CPU (home-pc)","gridPos":{"x":0,"y":15,"w":12,"h":8},
+          "targets":[{"expr":"topk(10, sum by(deployment)(rate(container_cpu_usage_seconds_total{image!=\"\", node=~\".*\"} * on(node) group_left kube_node_labels{label_node_type=\"home-pc\"}[5m])))"}]
+        },
+        {
+          "type":"table","title":"Top Deployments by Memory (home-pc)","gridPos":{"x":12,"y":15,"w":12,"h":8},
+          "targets":[{"expr":"topk(10, sum by(deployment)(container_memory_working_set_bytes{image!=\"\"} * on(node) group_left kube_node_labels{label_node_type=\"home-pc\"}))"}]
+        },
+        {"type":"row","title":"Control Plane"},
+        {
+          "type":"timeseries","title":"API Requests/s","gridPos":{"x":0,"y":23,"w":12,"h":8},
+          "targets":[{"expr":"sum(rate(apiserver_request_total[5m]))"}]
+        },
+        {
+          "type":"timeseries","title":"etcd DB Size MB","gridPos":{"x":12,"y":23,"w":12,"h":8},
+          "targets":[{"expr":"avg(etcd_mvcc_db_total_size_in_bytes)/1024/1024"}]
+        }
+      ]
+    }

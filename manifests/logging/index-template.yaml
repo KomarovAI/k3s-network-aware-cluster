@@ -1,0 +1,144 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticsearch-index-template
+  namespace: logging
+data:
+  k3s-logs-template.json: |
+    {
+      "index_patterns": ["logs-k3s-*"],
+      "template": {
+        "settings": {
+          "number_of_shards": 1,
+          "number_of_replicas": 0,
+          "index.lifecycle.name": "k3s-logs-policy",
+          "index.lifecycle.rollover_alias": "logs-k3s",
+          "index.refresh_interval": "30s",
+          "index.translog.durability": "async",
+          "index.translog.sync_interval": "30s",
+          "index.merge.policy.max_merged_segment": "5gb",
+          "index.codec": "default"
+        },
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "kubernetes_labels": {
+                "path_match": "kubernetes.labels.*",
+                "mapping": {
+                  "type": "keyword",
+                  "doc_values": false
+                }
+              }
+            },
+            {
+              "kubernetes_annotations": {
+                "path_match": "kubernetes.annotations.*", 
+                "mapping": {
+                  "type": "keyword",
+                  "index": false,
+                  "doc_values": false
+                }
+              }
+            },
+            {
+              "strings_as_keywords": {
+                "match_mapping_type": "string",
+                "mapping": {
+                  "type": "text",
+                  "fields": {
+                    "keyword": {
+                      "type": "keyword",
+                      "ignore_above": 256
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "@timestamp": {
+              "type": "date",
+              "format": "strict_date_optional_time||epoch_millis"
+            },
+            "message": {
+              "type": "text",
+              "analyzer": "simple",
+              "fields": {
+                "keyword": {
+                  "type": "keyword",
+                  "ignore_above": 8192
+                }
+              }
+            },
+            "level": {
+              "type": "keyword"
+            },
+            "kubernetes": {
+              "properties": {
+                "namespace": {"type": "keyword"},
+                "pod": {
+                  "properties": {
+                    "name": {"type": "keyword"},
+                    "uid": {"type": "keyword", "index": false}
+                  }
+                },
+                "container": {
+                  "properties": {
+                    "name": {"type": "keyword"},
+                    "image": {"type": "keyword", "doc_values": false}
+                  }
+                },
+                "node": {
+                  "properties": {
+                    "name": {"type": "keyword"}
+                  }
+                }
+              }
+            },
+            "host": {
+              "properties": {
+                "name": {"type": "keyword"}
+              }
+            },
+            "log": {
+              "properties": {
+                "file": {
+                  "properties": {
+                    "path": {"type": "keyword", "doc_values": false}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  
+  filebeat-k3s-template.json: |
+    {
+      "index_patterns": ["filebeat-k3s-*"],
+      "template": {
+        "settings": {
+          "number_of_shards": 1,
+          "number_of_replicas": 0,
+          "index.lifecycle.name": "k3s-logs-filebeat-policy",
+          "index.lifecycle.rollover_alias": "filebeat-k3s",
+          "index.refresh_interval": "30s",
+          "index.codec": "default"
+        },
+        "mappings": {
+          "properties": {
+            "@timestamp": {"type": "date"},
+            "message": {
+              "type": "text",
+              "analyzer": "simple",
+              "fields": {"keyword": {"type": "keyword", "ignore_above": 4096}}
+            },
+            "kubernetes.namespace": {"type": "keyword"},
+            "kubernetes.pod.name": {"type": "keyword"},
+            "kubernetes.container.name": {"type": "keyword"},
+            "log.level": {"type": "keyword"}
+          }
+        }
+      }
+    }

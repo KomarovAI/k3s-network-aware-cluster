@@ -1,0 +1,249 @@
+# Registry Configuration for Private Registries
+# Templates and examples for container registry access
+
+---
+# Example Secret for private registry authentication
+# Replace with actual credentials or use External Secrets
+apiVersion: v1
+kind: Secret
+metadata:
+  name: registry-credentials-example
+  namespace: apps
+  labels:
+    config-type: registry-auth
+    example: "true"
+  annotations:
+    description: "Example registry credentials - replace with real secrets"
+type: kubernetes.io/dockerconfigjson
+data:
+  # Base64 encoded docker config.json
+  # Example for Docker Hub: {"auths":{"https://index.docker.io/v1/":{"username":"user","password":"pass","email":"user@example.com","auth":"dXNlcjpwYXNz"}}}
+  .dockerconfigjson: eyJhdXRocyI6eyJodHRwczovL2luZGV4LmRvY2tlci5pby92MS8iOnsidXNlcm5hbWUiOiJleGFtcGxlLXVzZXIiLCJwYXNzd29yZCI6ImV4YW1wbGUtcGFzcyIsImVtYWlsIjoiZXhhbXBsZUBleGFtcGxlLmNvbSIsImF1dGgiOiJaWGhoYlhCc1pTMTFjMlZ5T21WNFlXMXdiR1V0Y0dGemN3PT0ifX19
+---
+# ConfigMap with registry configuration for K3S containerd
+# This should be applied manually to /etc/rancher/k3s/registries.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: containerd-registry-config
+  namespace: kube-system
+  labels:
+    config-type: containerd-registries
+  annotations:
+    description: "K3S containerd registry configuration template"
+    usage: "Copy data to /etc/rancher/k3s/registries.yaml on nodes"
+data:
+  registries.yaml: |
+    # Example K3S containerd registry configuration
+    # Copy this content to /etc/rancher/k3s/registries.yaml on all nodes
+    
+    mirrors:
+      # Docker Hub mirror (optional)
+      "docker.io":
+        endpoint:
+          - "https://registry-1.docker.io"
+      
+      # Private registry example
+      "your-registry.com":
+        endpoint:
+          - "https://your-registry.com"
+      
+      # GitHub Container Registry
+      "ghcr.io":
+        endpoint:
+          - "https://ghcr.io"
+    
+    configs:
+      # Docker Hub authentication (if needed)
+      "registry-1.docker.io":
+        auth:
+          username: "your-docker-username"
+          password: "your-docker-password"
+      
+      # Private registry authentication
+      "your-registry.com":
+        auth:
+          username: "your-username"
+          password: "your-password"
+        tls:
+          cert_file: "/etc/ssl/certs/registry.crt"
+          key_file: "/etc/ssl/private/registry.key"
+          ca_file: "/etc/ssl/certs/registry-ca.crt"
+          insecure_skip_verify: false
+      
+      # GitHub Container Registry (using GitHub token)
+      "ghcr.io":
+        auth:
+          username: "your-github-username"
+          password: "your-github-token"  # Use GitHub Personal Access Token
+      
+      # Local insecure registry (for development)
+      "localhost:5000":
+        tls:
+          insecure_skip_verify: true
+---
+# Example deployment using private registry
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: private-registry-app-example
+  namespace: apps
+  labels:
+    example: "true"
+  annotations:
+    description: "Example deployment using private registry"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: private-registry-example
+  template:
+    metadata:
+      labels:
+        app: private-registry-example
+    spec:
+      # Use registry credentials
+      imagePullSecrets:
+      - name: registry-credentials-example
+      
+      # Security context (Pod Security Standards compliant)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: app
+        # Example private registry image
+        image: your-registry.com/your-app:latest
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true
+        
+        ports:
+        - containerPort: 8080
+          name: http
+        
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /app/cache
+      
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 100Mi
+      - name: cache
+        emptyDir:
+          sizeLimit: 500Mi
+---
+# ServiceAccount with registry access (example)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: registry-access-sa
+  namespace: apps
+  labels:
+    purpose: registry-access
+    example: "true"
+imagePullSecrets:
+- name: registry-credentials-example
+automountServiceAccountToken: false
+---
+# Instructions ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registry-setup-instructions
+  namespace: kube-system
+  labels:
+    config-type: documentation
+data:
+  README.md: |
+    # Container Registry Configuration
+    
+    ## Setup Steps
+    
+    ### 1. Configure K3S containerd (on all nodes)
+    ```bash
+    # Copy registry configuration
+    sudo mkdir -p /etc/rancher/k3s
+    kubectl get configmap containerd-registry-config -n kube-system -o jsonpath='{.data.registries\.yaml}' > /tmp/registries.yaml
+    sudo cp /tmp/registries.yaml /etc/rancher/k3s/registries.yaml
+    
+    # Restart K3S to apply
+    sudo systemctl restart k3s  # On master
+    sudo systemctl restart k3s-agent  # On workers
+    ```
+    
+    ### 2. Create registry credentials
+    ```bash
+    # Docker Hub example
+    kubectl create secret docker-registry dockerhub-credentials \
+      --docker-server=https://index.docker.io/v1/ \
+      --docker-username=your-username \
+      --docker-password=your-password \
+      --docker-email=your-email@example.com \
+      -n apps
+    
+    # GitHub Container Registry example
+    kubectl create secret docker-registry ghcr-credentials \
+      --docker-server=ghcr.io \
+      --docker-username=your-github-username \
+      --docker-password=your-github-token \
+      -n apps
+    
+    # Private registry example
+    kubectl create secret docker-registry private-registry-credentials \
+      --docker-server=your-registry.com \
+      --docker-username=your-username \
+      --docker-password=your-password \
+      -n apps
+    ```
+    
+    ### 3. Use in deployments
+    ```yaml
+    spec:
+      imagePullSecrets:
+      - name: dockerhub-credentials
+      - name: ghcr-credentials
+      - name: private-registry-credentials
+    ```
+    
+    ### 4. Alternative: ServiceAccount with registry access
+    ```yaml
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: app-sa
+    imagePullSecrets:
+    - name: registry-credentials
+    ```
+    
+    ## Verification
+    ```bash
+    # Test registry access
+    kubectl run test-private-image \
+      --image=your-registry.com/test-image:latest \
+      --overrides='{
+        "spec": {
+          "imagePullSecrets": [
+            {"name": "registry-credentials"}
+          ]
+        }
+      }' \
+      --rm -it --restart=Never
+    ```

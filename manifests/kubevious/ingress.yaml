@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubevious
+  namespace: kubevious
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod-http01
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/enable-brotli: "true"
+spec:
+  tls:
+  - hosts:
+    - kubevious.${TLS_DOMAIN}
+    secretName: kubevious-tls
+  rules:
+  - host: kubevious.${TLS_DOMAIN}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kubevious-ui
+            port:
+              number: 80

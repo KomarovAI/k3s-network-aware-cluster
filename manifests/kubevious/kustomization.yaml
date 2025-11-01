@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kubevious
+resources:
+  - namespace.yaml
+  - ingress.yaml
+# Helm is installed manually. Values are provided in helm-values.yaml
+# Usage:
+#   helm repo add kubevious https://helm.kubevious.io
+#   helm upgrade --install kubevious kubevious/kubevious -n kubevious -f manifests/kubevious/helm-values.yaml

@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: registry-credentials
+  namespace: ops
+type: Opaque
+stringData:
+  DOCKERHUB_USERNAME: ${DOCKERHUB_USERNAME}
+  DOCKERHUB_TOKEN: ${DOCKERHUB_TOKEN}
+  GHCR_USERNAME: ${GHCR_USERNAME}
+  GHCR_TOKEN: ${GHCR_TOKEN}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry-cache
+  namespace: ops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: registry-cache
+  template:
+    metadata:
+      labels:
+        app: registry-cache
+    spec:
+      nodeSelector:
+        node-type: vps
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        effect: NoSchedule
+      containers:
+      - name: registry
+        image: registry:2
+        ports:
+        - containerPort: 5000
+        env:
+        - name: REGISTRY_PROXY_REMOTEURL
+          value: "https://registry-1.docker.io"
+        - name: REGISTRY_PROXY_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: registry-credentials
+              key: DOCKERHUB_USERNAME
+        - name: REGISTRY_PROXY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: registry-credentials
+              key: DOCKERHUB_TOKEN
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/registry
+      volumes:
+      - name: data
+        emptyDir: { sizeLimit: 20Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry-cache
+  namespace: ops
+spec:
+  selector:
+    app: registry-cache
+  ports:
+  - name: http
+    port: 5000
+    targetPort: 5000

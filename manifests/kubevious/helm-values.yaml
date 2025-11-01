@@ -1,0 +1,54 @@
+# Kubevious minimal values for single-worker hybrid cluster
+# Docs: https://kubevious.io/docs/ and https://helm.kubevious.io
+
+controller:
+  replicaCount: 1
+  nodeSelector:
+    node-type: home-pc
+  tolerations: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+ui:
+  replicaCount: 1
+  nodeSelector:
+    node-type: home-pc
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
+
+parser:
+  replicaCount: 1
+  nodeSelector:
+    node-type: home-pc
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+mysql:
+  enabled: true
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+    nodeSelector:
+      node-type: home-pc
+  auth:
+    database: kubevious
+    username: kubevious
+    password: change-me-please
+
+# If you prefer sqlite (no MySQL), set mysql.enabled=false (not recommended for larger clusters)
