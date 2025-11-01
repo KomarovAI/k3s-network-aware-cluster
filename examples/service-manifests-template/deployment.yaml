@@ -1,0 +1,179 @@
+# Kubernetes Deployment Template
+# Пример deployment.yaml для CI/CD сервиса
+# Поместить в k8s/deployment.yaml в репозитории сервиса
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${SERVICE_NAME}  # Подставляется через envsubst
+  namespace: ${KUBE_NAMESPACE}  # production или staging
+  labels:
+    app: ${SERVICE_NAME}
+    version: "${IMAGE_TAG}"  # Git commit SHA
+    tier: application
+    monitoring: enabled  # Обязательно для Prometheus
+    
+spec:
+  replicas: 2  # Минимальное количество для HA
+  revisionHistoryLimit: 5  # Храним 5 предыдущих версий для rollback
+  
+  selector:
+    matchLabels:
+      app: ${SERVICE_NAME}
+      
+  template:
+    metadata:
+      labels:
+        app: ${SERVICE_NAME}
+        version: "${IMAGE_TAG}"
+        # Обязательные метки для monitoring/tracing
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"  # Порт метрик
+        prometheus.io/path: "/metrics"
+        # Istio sidecar включается автоматически через namespace istio-injection=enabled
+        
+    spec:
+      # Умное размещение: приоритет worker, fallback на master
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: node-role.kubernetes.io/worker
+                operator: In
+                values: ["worker"]
+          - weight: 50
+            preference:
+              matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: NotIn
+                values: ["true"]
+      
+      # Anti-affinity: поды на разных нодах (если возможно)
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: ${SERVICE_NAME}
+              topologyKey: kubernetes.io/hostname
+      
+      containers:
+      - name: ${SERVICE_NAME}
+        image: ${DOCKER_REGISTRY}/${DOCKERHUB_USERNAME}/${SERVICE_NAME}:${IMAGE_TAG}
+        
+        # Оптимизированные ресурсы для production
+        resources:
+          requests:
+            cpu: 100m      # Минимальные ресурсы
+            memory: 128Mi
+          limits:
+            cpu: 1000m     # Максимум на worker
+            memory: 1Gi
+        
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: metrics  # Порт для Prometheus метрик
+          containerPort: 9090
+          protocol: TCP
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        
+        # Переменные окружения
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: SERVICE_NAME
+          value: "${SERVICE_NAME}"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        
+        # Опционально: секреты сервиса
+        # envFrom:
+        # - secretRef:
+        #     name: ${SERVICE_NAME}-secrets
+        # - configMapRef:
+        #     name: ${SERVICE_NAME}-config
+        
+        # Опционально: volume mounts
+        # volumeMounts:
+        # - name: app-storage
+        #   mountPath: /app/data
+        # - name: temp-storage
+        #   mountPath: /tmp
+      
+      # Опционально: volumes
+      # volumes:
+      # - name: app-storage
+      #   persistentVolumeClaim:
+      #     claimName: ${SERVICE_NAME}-storage
+      # - name: temp-storage
+      #   emptyDir:
+      #     sizeLimit: 1Gi
+      
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        
+      # Image pull secrets (для private registry)
+      # imagePullSecrets:
+      # - name: registry-secret
+      
+      # Graceful shutdown
+      terminationGracePeriodSeconds: 60
+      
+      # DNS policy для service mesh
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "2"
+        - name: edns0
+
+---
+# Опционально: PodDisruptionBudget для HA
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ${SERVICE_NAME}-pdb
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  minAvailable: 1  # Минимум 1 под всегда доступен
+  selector:
+    matchLabels:
+      app: ${SERVICE_NAME}
