@@ -205,6 +205,53 @@ class OptimizedClusterDeployer:
         ):
             return False
         
+        # 🔧 ВАЖНО: Принуждаем cert-manager остаться на master VPS
+        self.log_info("Закрепление cert-manager на master VPS...")
+        cert_manager_deployments = [
+            "cert-manager",
+            "cert-manager-cainjector", 
+            "cert-manager-webhook"
+        ]
+        
+        cert_manager_patch = {
+            "spec": {
+                "template": {
+                    "spec": {
+                        "nodeSelector": {
+                            "node-role.kubernetes.io/control-plane": "true"
+                        },
+                        "tolerations": [
+                            {
+                                "key": "node-role.kubernetes.io/control-plane",
+                                "operator": "Exists",
+                                "effect": "NoSchedule"
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        
+        for deployment in cert_manager_deployments:
+            try:
+                subprocess.run([
+                    "kubectl", "patch", "deployment", deployment,
+                    "-n", "cert-manager", "--patch", json.dumps(cert_manager_patch)
+                ], check=True)
+                self.log_success(f"cert-manager {deployment} закреплен на master")
+            except subprocess.CalledProcessError:
+                self.log_warning(f"Не удалось закрепить {deployment} на master (возможно, еще не готов)")
+        
+        # Даем время на перезапуск cert-manager с новыми ограничениями
+        time.sleep(30)
+        
+        # Проверяем, что cert-manager готов после патчинга
+        if not self.wait_for_condition(
+            "kubectl -n cert-manager rollout status deploy/cert-manager --timeout=180s",
+            "cert-manager готов после закрепления на master"
+        ):
+            self.log_warning("cert-manager медленно перезапускается, но продолжаем...")
+        
         # Применяем ClusterIssuer
         self.apply_cluster_issuers()
         
@@ -980,7 +1027,7 @@ spec:
         print(f"="*50)
         
         if self.worker_nodes:
-            print(f"🖥️  Master VPS (3 vCPU, 4GB RAM):")
+            print(f"🖥️  Master VPS (3 vCPU, 4GB RAM, 10 Gbps):")
             print(f"  ✅ K3S Control Plane")
             print(f"  ✅ ingress-nginx")
             print(f"  ✅ cert-manager") 
@@ -988,7 +1035,7 @@ spec:
             print(f"  ✅ Metrics Server")
             print(f"  📊 Использование: ~23% CPU, ~55% RAM")
             print()
-            print(f"🏠 Worker Home PC (26 CPU, 64GB RAM):")
+            print(f"🏠 Worker Home PC (26 CPU, 64GB RAM, 100 Mbps internet):")
             print(f"  ✅ Prometheus (мониторинг)")
             print(f"  ✅ Grafana (дашборды)")
             print(f"  ✅ Kubevious (визуализация)")
@@ -996,8 +1043,9 @@ spec:
             if self.enable_gpu:
                 print(f"  ✅ GPU Monitoring (RTX 3090)")
             print(f"  📊 Использование: ~4% CPU, ~3% RAM")
+            print(f"  📡 Связь с VPS: ~10 МБ/с (Tailscale)")
         else:
-            print(f"🖥️  Master VPS (3 vCPU, 4GB RAM):")
+            print(f"🖥️  Master VPS (3 vCPU, 4GB RAM, 10 Gbps):")
             print(f"  ✅ Все компоненты (с жесткими лимитами)")
             print(f"  📊 Использование: ~70% CPU, ~85% RAM")
             print(f"  ⚠️  Рекомендуется подключить worker ноду")
