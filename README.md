@@ -1,6 +1,6 @@
 # K3S Enhanced Hybrid Cluster 🚀
 
-> Production-ready K3S cluster for enhanced VPS (3 vCPU, 4GB RAM, 100GB NVMe, 1.25 Gbps) + single Home PC worker (26 CPU, 64GB RAM, 1TB NVMe, RTX 3090) with in-cluster TLS, monitoring, logging, GitOps, autoscaling, and service mesh.
+> Production-ready K3S cluster for enhanced VPS (3 vCPU, 4GB RAM, 100GB NVMe, 10 Gbps) + single Home PC worker (26 CPU, 64GB RAM, 1TB NVMe, RTX 3090) with in-cluster TLS, monitoring, logging, GitOps, autoscaling, and service mesh.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Production Ready](https://img.shields.io/badge/Production-Ready-green)](https://github.com/KomarovAI/k3s-network-aware-cluster)
@@ -19,14 +19,14 @@
 ## 🏗️ Архитектура и железо
 
 ### Профиль конфигурации
-- **VPS (master)**: 3 vCPU, 4 GB RAM, 100 GB NVMe, 1.25 Gbps
+- **VPS (master)**: 3 vCPU, 4 GB RAM, 100 GB NVMe, 10 Gbps (1.25 ГБ/с)
   - Роль: control plane + ingress + TLS
 - **Home PC (worker)**: 26 CPU, 64 GB RAM, 1 TB NVMe, RTX 3090
   - Роль: мониторинг, логирование, GitOps, mesh, tracing, тяжелые сервисы
   - Соединение с VPS: ~10 МБ/с (Tailscale)
 
 ### Ключевые оптимизации
-- **Сеть**: TCP BBR, gzip/brotli, APF (Priority-and-Fairness)
+- **Сеть**: TCP BBR, gzip/brotli, APF (Priority-and-Fairness), 10 Gbps enterprise канал
 - **Ресурсы**: VPA, image GC, registry cache
 - **Память master**: ZRAM 1GB + swap 8GB (pri: 150/50)
 - **Безопасность**: CIS Benchmark, NSA/CISA
@@ -133,7 +133,7 @@ python3 scripts/deploy_all_optimized.py --domain cockpit.work.gd --email artur.k
 ## 🛠️ Управляющие скрипты
 
 | Скрипт | Назначение |
-|--------|-----------|
+|--------|------------|
 | **check_dependencies.sh** | **🔍 Проверка всех зависимостей перед развертыванием** |
 | **auto_fix_dependencies.sh** | **🔧 Автоматическое исправление зависимостей** |
 | deploy_all_optimized.py | Базовый оптимизированный деплой кластера |
